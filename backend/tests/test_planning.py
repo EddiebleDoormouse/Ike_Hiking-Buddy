@@ -364,3 +364,21 @@ def test_cold_kit_still_passes_cold_check_with_gaps():
     draft = make_draft(kit=["Warm gloves"])
     check = check_named(run(draft, make_forecast(drop_hours=frozenset({10}))), "Cold")
     assert check.passed
+
+
+def test_known_hazards_stay_visible_next_to_gaps():
+    # 65 km/h gust at 09:00, no data at 10:00, calm at 11:00.
+    forecast = make_forecast(overrides={9: {"gust_kmh": 65.0, "precip_prob": 90, "temp_c": -3.0}},
+                             drop_hours=frozenset({10}))
+    checks = run(forecast=forecast)
+    wind, rain, cold = (check_named(checks, n) for n in ("Wind", "Rain", "Cold"))
+    assert not wind.passed and "65 km/h" in wind.detail and "missing 1 of 3 hours" in wind.detail
+    assert not rain.passed and "90%" in rain.detail and "missing 1 of 3 hours" in rain.detail
+    assert not cold.passed and "-3.0 °C" in cold.detail and "missing 1 of 3 hours" in cold.detail
+    assert wind.detail.count(".") == 1  # still one sentence
+
+
+def test_all_hours_missing_gives_gap_sentence_only():
+    checks = run(forecast=make_forecast(in_range=False))
+    wind = check_named(checks, "Wind")
+    assert wind.detail.startswith("The forecast is missing 3 of 3 hours of the hike")
