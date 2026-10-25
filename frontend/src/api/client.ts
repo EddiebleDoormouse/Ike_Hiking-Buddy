@@ -26,6 +26,7 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+/** Turn a FastAPI `detail` payload — a string or a 422 {loc,msg,type} list — into one readable sentence. */
 function describeDetail(detail: unknown): string {
   if (typeof detail === 'string') return detail
   // FastAPI 422 responses return a list of {loc, msg, type} entries.
@@ -38,6 +39,7 @@ function describeDetail(detail: unknown): string {
   return ''
 }
 
+/** Map an HTTP status + backend detail to the friendly message shown in toasts and error boxes. */
 export function friendlyApiError(status: number, detail: string): string {
   const notReady = detail.match(/^not implemented yet \((.+)\)$/)
   if (status === 501) {
@@ -119,6 +121,7 @@ export async function getHike(id: string): Promise<HikeDetail> {
   return request<HikeDetail>(`/hikes/${encodeURIComponent(id)}`)
 }
 
+/** Fetch one media item's metadata. Its bytes stream via mediaUrl, not this call. */
 export async function getMedia(id: string): Promise<MediaItem> {
   if (USE_MOCKS) {
     await sleep(300)
@@ -146,6 +149,7 @@ export type UploadProgress = {
   stage: 'uploading' | 'analysing'
 }
 
+/** POST a file with XHR so percent is visible; stage flips to 'analysing' once bytes are sent and Gemini is working. */
 function uploadWithProgress(
   hikeId: string,
   file: File,
@@ -189,6 +193,7 @@ function uploadWithProgress(
   })
 }
 
+/** Upload a photo/audio/video file to a hike; resolves to the stored media and any sighting it produced. */
 export async function uploadMedia(
   hikeId: string,
   file: File,
@@ -373,6 +378,7 @@ export async function search(q: string, hikeId?: string): Promise<SearchResult[]
   return request<SearchResult[]>(`/search?${params.toString()}`)
 }
 
+/** Species recorded near a point for a month — feeds the plan's "what you might see" (D2 endpoint; 501 on main). */
 export async function speciesNear(
   lat: number,
   lon: number,
@@ -393,6 +399,7 @@ export async function speciesNear(
   return request<SpeciesNear[]>(`/species/near?${params.toString()}`)
 }
 
+/** Build the streaming URL for a media item's bytes (variant: 'display' | 'thumb' | 'original'). */
 export function mediaUrl(
   id: string,
   variant: MediaVariant = 'display',

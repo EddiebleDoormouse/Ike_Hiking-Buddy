@@ -18,8 +18,11 @@ export function ToastHost() {
     () => onApiError((message) => {
       const id = nextId++
       setToasts((current) => {
-        if (current.length > 0 && current[current.length - 1].message === message) {
-          return current
+        // Same message as the visible toast: swap in a new id so the
+        // auto-dismiss timer restarts instead of expiring immediately.
+        const last = current[current.length - 1]
+        if (last && last.message === message) {
+          return [...current.slice(0, -1), { id, message }]
         }
         return [...current.slice(-(MAX_TOASTS - 1)), { id, message }]
       })

@@ -123,6 +123,7 @@ function HikeFolder() {
     }
   }
 
+  /** Upload a GPX/FIT track and merge the returned route + stats into the open hike folder. */
   async function onUploadTrack(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -373,8 +374,8 @@ function MediaSection({
             {audio.map((item) => (
               <Panel className="audio-card" key={item.id}>
                 <h3>{item.caption || item.filename}</h3>
-                <audio controls preload="none" src={item.display_file_id ? mediaUrl(item.id) : undefined} />
-                {!item.display_file_id && <p className="muted small">Audio preview isn’t available in this demo.</p>}
+                <audio controls preload="none" src={item.original_file_id ? mediaUrl(item.id) : undefined} />
+                {!item.original_file_id && <p className="muted small">Audio preview isn’t available in this demo.</p>}
                 <p className="muted small">{formatDate(item.taken_at ?? item.created_at)}</p>
               </Panel>
             ))}
