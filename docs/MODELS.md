@@ -11,4 +11,13 @@ All calls use the Gemini Interactions API. Do not set `temperature`, `top_p`,
 
 ## Latency
 
-Latency is still to be measured; there is no API key in the build environment.
+Live run, 25 Oct 2026, all calls at `high`, for a synthetic Chilterns hike (Tring to Ivinghoe Beacon, 13 km, 330 m ascent) on Sat 31 Oct:
+
+| Step | ms |
+|---|---|
+| forecast (Open-Meteo) | 337 |
+| research_hazards | 96307 |
+| draft_plan | 57273 |
+| total (0 revisions, all checks passed) | 153917 |
+
+The hazard search accounts for most of the time. Any revision after this point would run at `low`, because the loop is already past 45 s.
