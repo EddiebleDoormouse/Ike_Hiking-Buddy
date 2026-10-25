@@ -1,16 +1,12 @@
-# Model use
+# Gemini model calls
 
-| Call | Model | Thinking level | Tools / output |
-|---|---|---|---|
-| `analyze_media` (photo: display JPEG; audio: original clip) | `gemini-3.8-flash` (`settings.MEDIA_MODEL`) | `low` | Structured JSON matching `MediaAnalysis` (caption, tags, is_organism, ≤3 candidates with group, safety_note); one retry on invalid JSON |
+| function | model | thinking_level | why | latency |
+|---|---|---|---|---|
+| `ping_models` | `gemini-4-argon`, `gemini-3.8-flash` | low | Smoke test | not measured: no GEMINI_API_KEY on build VM |
+| `analyze_media` (DV-P1) | `gemini-3.8-flash` | low | Fast per-media caption + up to 3 candidates; structured JSON (`MediaAnalysis`), one retry on invalid JSON; photo = display JPEG, audio = original clip | not measured: no GEMINI_API_KEY on build VM |
+| `research_hazards` / `draft_plan` / `revise_plan` (DV-P2) | `gemini-4-argon` | high | Planning research and checks loop | Not measured yet |
+| `recap` | `gemini-4-argon` | TBD | Long-context hike recap | TBD |
 
-All calls use the Gemini Interactions API. Do not set `temperature`, `top_p`,
-`top_k`, or `thinking_budget`.
+All calls go through the Interactions API in `backend/app/services/gemini.py`. Never set `temperature`, `top_p`, `top_k`, or `thinking_budget`.
 
-## Latency
-
-Each `analyze_media` call logs `latency_ms` (logger `app.services.gemini`).
-
-| Call | Input | Latency | Notes |
-|---|---|---|---|
-| `analyze_media` | — | not measured yet | no `GEMINI_API_KEY` in the build environment |
+`analyze_media` logs `latency_ms` per call (logger `app.services.gemini`).

@@ -16,9 +16,10 @@ from gridfs import GridFSBucket
 from gridfs.errors import NoFile
 from pymongo.database import Database
 
-from app.db import get_db, get_files
-from app.models import MediaItem, MediaAnalysis, Sighting, UploadMediaResponse
+from app.db import get_bucket, get_db
+from app.models import MediaItem, Sighting, UploadMediaResponse
 from app.services import gemini
+from app.services.gemini import MediaAnalysis
 from app.services.images import thumbnail, to_display_jpeg
 
 router = APIRouter(tags=["media"])
@@ -179,7 +180,7 @@ def upload_media(
     kind: MediaKind | None = Form(None),
     text: str | None = Form(None),
     db: Database = Depends(get_db),
-    files: GridFSBucket = Depends(get_files),
+    files: GridFSBucket = Depends(get_bucket),
 ) -> UploadMediaResponse:
     """Upload a photo, audio clip, video, or note to a hike."""
     hike_oid = _object_id(hike_id, detail="Hike not found")
@@ -211,7 +212,7 @@ def upload_media(
     else:
         data = b""
         filename = "note.txt"
-        mime = "text/plain"
+        mime = "text/plain; charset=utf-8"
         selected_kind = kind or "note"
         if selected_kind != "note":
             raise HTTPException(status_code=400, detail="A file is required")
@@ -220,6 +221,7 @@ def upload_media(
     if selected_kind == "note":
         if file is None:
             note_text = text
+            data = note_text.encode("utf-8")
         else:
             try:
                 note_text = data.decode("utf-8")
@@ -298,40 +300,35 @@ def upload_media(
     media_id = None
     sighting_document = None
     try:
-        if file is not None:
-            original_file_id = _upload_file(files, filename, data, mime)
-            uploaded_file_ids.append(original_file_id)
-            if (
-                display is not None
-                and thumb is not None
-                and safe_original is not None
-            ):
-                stem = Path(filename).stem or "image"
-                display_file_id = _upload_file(
-                    files,
-                    f"{stem}.jpg",
-                    display,
-                    "image/jpeg",
-                )
-                uploaded_file_ids.append(display_file_id)
-                thumb_file_id = _upload_file(
-                    files,
-                    f"{stem}_thumb.jpg",
-                    thumb,
-                    "image/jpeg",
-                )
-                uploaded_file_ids.append(thumb_file_id)
-                safe_original_file_id = _upload_file(
-                    files,
-                    f"{stem}_original.jpg",
-                    safe_original,
-                    "image/jpeg",
-                )
-                uploaded_file_ids.append(safe_original_file_id)
-            media_document["original_file_id"] = original_file_id
-            media_document["display_file_id"] = display_file_id
-            media_document["thumb_file_id"] = thumb_file_id
-            media_document["safe_original_file_id"] = safe_original_file_id
+        original_file_id = _upload_file(files, filename, data, mime)
+        uploaded_file_ids.append(original_file_id)
+        if display is not None and thumb is not None and safe_original is not None:
+            stem = Path(filename).stem or "image"
+            display_file_id = _upload_file(
+                files,
+                f"{stem}.jpg",
+                display,
+                "image/jpeg",
+            )
+            uploaded_file_ids.append(display_file_id)
+            thumb_file_id = _upload_file(
+                files,
+                f"{stem}_thumb.jpg",
+                thumb,
+                "image/jpeg",
+            )
+            uploaded_file_ids.append(thumb_file_id)
+            safe_original_file_id = _upload_file(
+                files,
+                f"{stem}_original.jpg",
+                safe_original,
+                "image/jpeg",
+            )
+            uploaded_file_ids.append(safe_original_file_id)
+        media_document["original_file_id"] = original_file_id
+        media_document["display_file_id"] = display_file_id
+        media_document["thumb_file_id"] = thumb_file_id
+        media_document["safe_original_file_id"] = safe_original_file_id
 
         media_result = db.media.insert_one(media_document)
         media_id = media_result.inserted_id
@@ -408,7 +405,7 @@ def get_media_file(
     media_id: str,
     variant: Literal["display", "thumb", "original"] = "display",
     db: Database = Depends(get_db),
-    files: GridFSBucket = Depends(get_files),
+    files: GridFSBucket = Depends(get_bucket),
 ) -> Response:
     """Stream photos from metadata-free JPEGs, re-encoding legacy originals."""
     media_oid = _object_id(media_id)

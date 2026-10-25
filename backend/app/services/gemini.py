@@ -1,4 +1,4 @@
-"""Gemini Interactions API helpers for media analysis."""
+"""Shared Gemini Interactions API helpers."""
 
 import base64
 import logging
@@ -6,31 +6,16 @@ import time
 from typing import Any
 
 from google import genai
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.models import Candidate, MediaAnalysis
+from app.models import Candidate
 
-MEDIA_THINKING_LEVEL = "low"
-MAX_CANDIDATES = 3
-FUNGUS_SAFETY_NOTE = "Never eat anything based on this ID"
-MEDIA_PROMPT = """You are a careful UK naturalist helping a hiker log what they saw on a walk in the United Kingdom.
-You will receive one photo or one audio clip, plus context (place, coordinates, date, hike title).
+ARGON = "gemini-4-argon"
+FLASH = "gemini-3.8-flash"
 
-Return JSON matching the schema:
-- caption: 1-2 plain sentences that would help someone find this item later by search. Name the main subject, its colours, the habitat, the landscape, and the light or weather if visible. For audio, describe what can be heard (e.g. "A wren singing loudly from dense scrub, with a stream in the background").
-- tags: 3 to 8 short lowercase tags (e.g. "oak", "woodland", "autumn", "mushroom", "birdsong", "moorland").
-- is_organism: true only if a living (or recently living) wild plant, animal, fungus or lichen is the clear subject. Landscapes, views, trails, buildings, people, pets, farm livestock and food are false.
-- candidates: if is_organism is false, return an empty list. Otherwise give at most 3 candidate identifications, most likely first. Prefer species that occur in the UK at this place and time of year. Each has common_name (UK English), scientific_name (Latin binomial, or genus if you cannot go further), confidence (0 to 1) and group.
-- confidence must be honest: it is your probability that the candidate is correct. Use high values (above 0.8) only when the diagnostic features are clearly visible or audible. Blurry, distant, partial or noisy input gets low values. Confidences across candidates should not add up to more than 1.
-- group: exactly one of "plant", "fungus", "bird", "mammal", "insect", "reptile", "amphibian", "fish", "lichen", "other". This routes the sighting to a specialist checker (plants and fungi to image specialists, birds to a song checker), so choose it carefully: mushrooms, toadstools and brackets are "fungus", not "plant"; moths, butterflies, beetles and bees are "insect"; spiders and slugs are "other".
-- safety_note: if any candidate is a fungus, or the photo shows berries or fruit, set it to exactly "Never eat anything based on this ID". Otherwise null. Never say that anything is edible or safe to eat.
-
-Audio clips: identify birds by their song or call. If no bird or other animal can be heard (e.g. only wind, water or people), set is_organism to false and give no candidates.
-Never present an identification as certain."""
-
-logger = logging.getLogger(__name__)
 _client: genai.Client | None = None
+
 
 class GeminiError(Exception):
     """Raised when a Gemini request or structured response is invalid."""
@@ -53,6 +38,76 @@ def create_interaction(**kwargs: Any) -> Any:
         return get_client().interactions.create(**kwargs)
     except Exception as exc:
         raise GeminiError(f"Gemini request failed: {exc}") from exc
+
+
+def ping_models() -> dict[str, dict]:
+    """Smoke-test the configured Gemini models and report their latency."""
+    results = {}
+    for model in (ARGON, FLASH):
+        start_time = time.perf_counter()
+        try:
+            interaction = create_interaction(
+                model=model,
+                input="Reply with the single word OK.",
+                generation_config={"thinking_level": "low"},
+            )
+            reply = (getattr(interaction, "output_text", None) or "").strip()
+            latency_s = round(time.perf_counter() - start_time, 2)
+            if (
+                getattr(interaction, "status", None) == "failed"
+                or not reply
+            ):
+                results[model] = {
+                    "ok": False,
+                    "latency_s": latency_s,
+                    "error": "empty or failed reply",
+                    "reply": None,
+                }
+                continue
+            results[model] = {
+                "ok": True,
+                "latency_s": latency_s,
+                "error": None,
+                "reply": reply[:40],
+            }
+        except GeminiError as exc:
+            results[model] = {
+                "ok": False,
+                "latency_s": None,
+                "error": str(exc),
+                "reply": None,
+            }
+    return results
+
+
+MEDIA_THINKING_LEVEL = "low"
+MAX_CANDIDATES = 3
+FUNGUS_SAFETY_NOTE = "Never eat anything based on this ID"
+MEDIA_PROMPT = """You are a careful UK naturalist helping a hiker log what they saw on a walk in the United Kingdom.
+You will receive one photo or one audio clip, plus context (place, coordinates, date, hike title).
+
+Return JSON matching the schema:
+- caption: 1-2 plain sentences that would help someone find this item later by search. Name the main subject, its colours, the habitat, the landscape, and the light or weather if visible. For audio, describe what can be heard (e.g. "A wren singing loudly from dense scrub, with a stream in the background").
+- tags: 3 to 8 short lowercase tags (e.g. "oak", "woodland", "autumn", "mushroom", "birdsong", "moorland").
+- is_organism: true only if a living (or recently living) wild plant, animal, fungus or lichen is the clear subject. Landscapes, views, trails, buildings, people, pets, farm livestock and food are false.
+- candidates: if is_organism is false, return an empty list. Otherwise give at most 3 candidate identifications, most likely first. Prefer species that occur in the UK at this place and time of year. Each has common_name (UK English), scientific_name (Latin binomial, or genus if you cannot go further), confidence (0 to 1) and group.
+- confidence must be honest: it is your probability that the candidate is correct. Use high values (above 0.8) only when the diagnostic features are clearly visible or audible. Blurry, distant, partial or noisy input gets low values. Confidences across candidates should not add up to more than 1.
+- group: exactly one of "plant", "fungus", "bird", "mammal", "insect", "reptile_amphibian", "other". This routes the sighting to a specialist checker (plants and fungi to image specialists, birds to a song checker), so choose it carefully: mushrooms, toadstools and brackets are "fungus", not "plant"; moths, butterflies, beetles and bees are "insect"; lichens, fish, spiders and slugs are "other"; frogs, toads, newts, lizards and snakes are "reptile_amphibian".
+- safety_note: if any candidate is a fungus, or the photo shows berries or fruit, set it to exactly "Never eat anything based on this ID". Otherwise null. Never say that anything is edible or safe to eat.
+
+Audio clips: identify birds by their song or call. If no bird or other animal can be heard (e.g. only wind, water or people), set is_organism to false and give no candidates.
+Never present an identification as certain."""
+
+
+class MediaAnalysis(BaseModel):
+    caption: str
+    tags: list[str]
+    is_organism: bool
+    candidates: list[Candidate] = []
+    safety_note: str | None = None
+
+
+logger = logging.getLogger(__name__)
 
 
 def _format_context(ctx: dict) -> str:

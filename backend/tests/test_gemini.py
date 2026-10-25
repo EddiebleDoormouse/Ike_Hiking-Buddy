@@ -13,6 +13,7 @@ from app.services import gemini
 from app.services.gemini import (
     FUNGUS_SAFETY_NOTE,
     GeminiError,
+    MEDIA_PROMPT,
     MediaAnalysis,
     analyze_media,
 )
@@ -257,6 +258,11 @@ def test_http_400_is_wrapped_and_not_retried():
         analyze_media(b"image", "image/jpeg", {})
 
     assert route.call_count == 1
+
+
+def test_media_prompt_uses_p0_group_values():
+    assert '"reptile_amphibian"' in MEDIA_PROMPT
+    assert '"amphibian"' not in MEDIA_PROMPT
 
 
 @pytest.mark.live

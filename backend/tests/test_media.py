@@ -13,11 +13,12 @@ from PIL import Image
 from pymongo import MongoClient
 import pytest
 
-from app.db import get_db, get_files
+from app.db import get_bucket, get_db
 from app.main import app
-from app.models import Candidate, MediaAnalysis
+from app.models import Candidate
 from app.routers import media as media_router
 from app.services import gemini
+from app.services.gemini import MediaAnalysis
 from app.services.images import thumbnail, to_display_jpeg
 
 
@@ -218,7 +219,7 @@ def fake_bucket():
 @pytest.fixture
 def client(fake_db, fake_bucket):
     app.dependency_overrides[get_db] = lambda: fake_db
-    app.dependency_overrides[get_files] = lambda: fake_bucket
+    app.dependency_overrides[get_bucket] = lambda: fake_bucket
     try:
         with TestClient(app) as test_client:
             yield test_client
@@ -229,7 +230,7 @@ def client(fake_db, fake_bucket):
 @pytest.fixture
 def client_no_raise(fake_db, fake_bucket):
     app.dependency_overrides[get_db] = lambda: fake_db
-    app.dependency_overrides[get_files] = lambda: fake_bucket
+    app.dependency_overrides[get_bucket] = lambda: fake_bucket
     try:
         with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
@@ -544,11 +545,15 @@ def test_text_form_upload_creates_note_without_a_file(client, fake_bucket):
     assert media["kind"] == "note"
     assert media["caption"] == note
     assert media["text"] == note
-    assert media["original_file_id"] is None
-    assert fake_bucket.files == {}
-    missing_file = client.get(f"/media/{media['id']}/file")
-    assert missing_file.status_code == 404
-    assert missing_file.json()["detail"] == "This item has no file"
+    assert isinstance(media["original_file_id"], str)
+    assert len(fake_bucket.files) == 1
+    stored_file = next(iter(fake_bucket.files.values()))
+    assert stored_file["filename"] == "note.txt"
+    assert stored_file["metadata"]["content_type"] == "text/plain; charset=utf-8"
+
+    file_response = client.get(f"/media/{media['id']}/file")
+    assert file_response.status_code == 200
+    assert file_response.text == note
 
 
 def test_gemini_error_returns_friendly_502_without_storing_media(
@@ -774,7 +779,7 @@ def test_mongodb_photo_upload_detail_and_file_variants(monkeypatch):
     database = mongo[db_name]
     bucket = GridFSBucket(database, bucket_name="media_files")
     app.dependency_overrides[get_db] = lambda: database
-    app.dependency_overrides[get_files] = lambda: bucket
+    app.dependency_overrides[get_bucket] = lambda: bucket
     monkeypatch.setattr(gemini, "analyze_media", lambda *args: sample_analysis())
     hike_id = None
 

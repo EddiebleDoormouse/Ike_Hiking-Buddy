@@ -6,7 +6,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 import pytest
 
-from app.db import get_db, get_files
+from app.db import get_bucket, get_db
 from app.main import app
 from test_media import FakeBucket, FakeCollection, FakeDB
 
@@ -45,7 +45,7 @@ def fake_bucket():
 @pytest.fixture
 def client(fake_db, fake_bucket):
     app.dependency_overrides[get_db] = lambda: fake_db
-    app.dependency_overrides[get_files] = lambda: fake_bucket
+    app.dependency_overrides[get_bucket] = lambda: fake_bucket
     try:
         with TestClient(app) as test_client:
             yield test_client
@@ -82,7 +82,7 @@ def make_media(hike_id, kind, created_at, filename="walk.jpg"):
         "kind": kind,
         "filename": filename,
         "mime": "image/jpeg",
-        "original_file_id": None,
+        "original_file_id": str(ObjectId()),
         "display_file_id": None,
         "thumb_file_id": None,
         "taken_at": None,
