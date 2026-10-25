@@ -3,6 +3,7 @@ import HikeFolder from './pages/HikeFolder'
 import HikesGallery from './pages/HikesGallery'
 import NewHike from './pages/NewHike'
 import Search from './pages/Search'
+import { ToastHost } from './components/Toast'
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
           </Routes>
         </main>
         <footer className="site-footer">A quieter place for days outside <span>·</span> Plans are suggestions, not a substitute for local judgement.</footer>
+        <ToastHost />
       </div>
     </BrowserRouter>
   )

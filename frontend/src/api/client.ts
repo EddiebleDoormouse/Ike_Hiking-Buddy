@@ -1,5 +1,7 @@
+import { notifyApiError } from './errors'
 import { asHikeDetail, createMockHike, mockState } from './mocks'
 import type {
+  Candidate,
   Health,
   Hike,
   HikeCard,
@@ -7,10 +9,12 @@ import type {
   HikeDetail,
   HikeStats,
   MediaItem,
+  MediaVariant,
   Plan,
   RecapResponse,
   SearchResult,
   Sighting,
+  SpeciesNear,
   TrackUploadResponse,
   UploadMediaResponse,
 } from './types'
@@ -22,17 +26,49 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+function describeDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  // FastAPI 422 responses return a list of {loc, msg, type} entries.
+  if (Array.isArray(detail)) {
+    return detail
+      .map((entry) => (entry && typeof entry === 'object' && 'msg' in entry ? String(entry.msg) : ''))
+      .filter(Boolean)
+      .join('; ')
+  }
+  return ''
+}
+
+export function friendlyApiError(status: number, detail: string): string {
+  const notReady = detail.match(/^not implemented yet \((.+)\)$/)
+  if (status === 501) {
+    return `This part of the API isn't ready yet${notReady ? ` (${notReady[1]})` : ''}.`
+  }
+  if (status === 404) return detail || 'Not found.'
+  if (detail) return `Request failed (${status}): ${detail}`
+  if (status >= 500) return `The server hit an error (${status}). Please try again.`
+  return `Request failed (${status}).`
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, init)
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, init)
+  } catch {
+    const message = `Could not reach the API at ${API_URL}. Is the backend running?`
+    notifyApiError(message)
+    throw new Error(message)
+  }
   if (!response.ok) {
     let detail = ''
     try {
-      const payload: { detail?: string } = await response.json()
-      detail = payload.detail ? `: ${payload.detail}` : ''
+      const payload: { detail?: unknown } = await response.json()
+      detail = describeDetail(payload.detail)
     } catch {
       detail = ''
     }
-    throw new Error(`Request failed (${response.status})${detail}`)
+    const message = friendlyApiError(response.status, detail)
+    notifyApiError(message)
+    throw new Error(message)
   }
   return response.json() as Promise<T>
 }
@@ -83,6 +119,16 @@ export async function getHike(id: string): Promise<HikeDetail> {
   return request<HikeDetail>(`/hikes/${encodeURIComponent(id)}`)
 }
 
+export async function getMedia(id: string): Promise<MediaItem> {
+  if (USE_MOCKS) {
+    await sleep(300)
+    const media = mockState.media.find((item) => item.id === id)
+    if (!media) throw new Error('Media not found.')
+    return media
+  }
+  return request<MediaItem>(`/media/${encodeURIComponent(id)}`)
+}
+
 export async function createHike(body: HikeCreate): Promise<Hike> {
   if (USE_MOCKS) {
     await sleep(600)
@@ -95,36 +141,48 @@ export async function createHike(body: HikeCreate): Promise<Hike> {
   })
 }
 
+export type UploadProgress = {
+  percent: number
+  stage: 'uploading' | 'analysing'
+}
+
 function uploadWithProgress(
   hikeId: string,
   file: File,
-  onProgress?: (pct: number) => void,
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<UploadMediaResponse> {
   return new Promise((resolve, reject) => {
+    const fail = (message: string) => {
+      notifyApiError(message)
+      reject(new Error(message))
+    }
     const form = new FormData()
     form.append('file', file)
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${API_URL}/hikes/${encodeURIComponent(hikeId)}/media`)
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100))
+      if (event.lengthComputable) {
+        onProgress?.({ percent: Math.round((event.loaded / event.total) * 100), stage: 'uploading' })
+      }
     }
-    xhr.onerror = () => reject(new Error('Upload failed. Check your connection and try again.'))
+    xhr.upload.onload = () => onProgress?.({ percent: 100, stage: 'analysing' })
+    xhr.onerror = () => fail('Upload failed. Check your connection and try again.')
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) {
         let detail = ''
         try {
-          const payload = JSON.parse(xhr.responseText) as { detail?: string }
-          if (payload.detail) detail = `: ${payload.detail}`
+          const payload = JSON.parse(xhr.responseText) as { detail?: unknown }
+          detail = describeDetail(payload.detail)
         } catch {
           detail = ''
         }
-        reject(new Error(`Upload failed (${xhr.status})${detail}`))
+        fail(friendlyApiError(xhr.status, detail) || `Upload failed (${xhr.status}).`)
         return
       }
       try {
         resolve(JSON.parse(xhr.responseText) as UploadMediaResponse)
       } catch {
-        reject(new Error('The server returned an unreadable upload response.'))
+        fail('The server returned an unreadable upload response.')
       }
     }
     xhr.send(form)
@@ -134,16 +192,19 @@ function uploadWithProgress(
 export async function uploadMedia(
   hikeId: string,
   file: File,
-  onProgress?: (pct: number) => void,
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<UploadMediaResponse> {
   if (!USE_MOCKS) return uploadWithProgress(hikeId, file, onProgress)
   const objectUrl = URL.createObjectURL(file)
   const id = `media-upload-${Date.now()}`
   mockState.objectUrls.set(id, objectUrl)
-  for (const progress of [15, 38, 64, 86, 100]) {
+  for (const percent of [15, 38, 64, 86, 100]) {
     await sleep(120)
-    onProgress?.(progress)
+    onProgress?.({ percent, stage: 'uploading' })
   }
+  await sleep(400)
+  onProgress?.({ percent: 100, stage: 'analysing' })
+  await sleep(500)
   const media: MediaItem = {
     id,
     hike_id: hikeId,
@@ -161,7 +222,7 @@ export async function uploadMedia(
     text: null,
     created_at: new Date().toISOString(),
   }
-  const candidate = {
+  const candidate: Candidate = {
     common_name: 'Common Buzzard',
     scientific_name: 'Buteo buteo',
     confidence: 0.61,
@@ -312,9 +373,29 @@ export async function search(q: string, hikeId?: string): Promise<SearchResult[]
   return request<SearchResult[]>(`/search?${params.toString()}`)
 }
 
+export async function speciesNear(
+  lat: number,
+  lon: number,
+  options: { month?: number; radiusKm?: number } = {},
+): Promise<SpeciesNear[]> {
+  if (USE_MOCKS) {
+    await sleep(600)
+    void lat
+    void lon
+    return mockState.hikes.at(-1)?.plan?.what_you_might_see ?? []
+  }
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    radius_km: String(options.radiusKm ?? 10),
+  })
+  if (options.month != null) params.set('month', String(options.month))
+  return request<SpeciesNear[]>(`/species/near?${params.toString()}`)
+}
+
 export function mediaUrl(
   id: string,
-  variant: 'display' | 'thumb' | 'original' = 'display',
+  variant: MediaVariant = 'display',
 ): string {
   if (USE_MOCKS) {
     const uploadedUrl = mockState.objectUrls.get(id)
