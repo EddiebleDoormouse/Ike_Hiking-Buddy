@@ -165,3 +165,16 @@ export type TrackUploadResponse = {
 export type RecapResponse = {
   recap_md: string
 }
+
+export type PlanStage = 'idle' | 'queued' | 'forecast' | 'hazards' | 'draft' | 'checks' | 'revise' | 'done' | 'error'
+
+export type PlanProgress = {
+  stage: PlanStage
+  message: string
+  revision?: number
+  failed?: string[]
+  elapsed_ms?: number
+  updated_at?: string
+  run_id?: string
+  events?: PlanProgress[]
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import type { Plan } from '../api/types'
+import { getPlanProgress } from '../api/client'
+import type { Plan, PlanProgress } from '../api/types'
 
 export function StatusBadge({ status }: { status: string }) {
   const label = status === 'not_applicable'
@@ -69,6 +70,65 @@ export function StepLoader({ label = 'Preparing your hike' }: { label?: string }
           </li>
         ))}
       </ul>
+    </Panel>
+  )
+}
+
+const PROGRESS_POLL_MS = 1000
+
+function sameStep(a: PlanProgress, b: PlanProgress): boolean {
+  return a.stage === b.stage && a.message === b.message
+}
+
+/** Live list of planner stages, polled from the backend while a plan is generated. */
+export function PlanProgressLoader({ hikeId, label }: { hikeId?: string; label: string }) {
+  const [history, setHistory] = useState<PlanProgress[]>([])
+
+  useEffect(() => {
+    if (!hikeId) return
+    let cancelled = false
+    async function poll() {
+      const progress = await getPlanProgress(hikeId as string)
+      if (cancelled || !progress) return
+      if (progress.events) {
+        setHistory(progress.events.filter((event) => event.stage !== 'idle' && event.stage !== 'queued'))
+        return
+      }
+      if (progress.stage === 'idle' || progress.stage === 'queued') return
+      setHistory((steps) => {
+        const last = steps.at(-1)
+        return last && sameStep(last, progress) ? [...steps.slice(0, -1), progress] : [...steps, progress]
+      })
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), PROGRESS_POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [hikeId])
+
+  if (history.length === 0) return <StepLoader label={label} />
+  const current = history.at(-1)
+  const seconds = Math.round((current?.elapsed_ms ?? 0) / 1000)
+  return (
+    <Panel className="panel-pad">
+      <p className="eyebrow">{label}</p>
+      <ul className="loading-steps" aria-live="polite">
+        {history.map((step, index) => {
+          const isCurrent = index === history.length - 1 && step.stage !== 'done'
+          const hasFailures = step.stage === 'checks' && (step.failed?.length ?? 0) > 0
+          const className = hasFailures ? 'failed' : isCurrent ? 'current' : 'done'
+          const marker = hasFailures ? '✕' : isCurrent ? '◌' : '✓'
+          return (
+            <li className={className} key={`${index}-${step.stage}`}>
+              {marker} {step.message}
+              {hasFailures && <span className="small"> — {step.failed?.join(', ')}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="muted small">Elapsed {seconds} s · Gemini is checking its own plan against the forecast and sources.</p>
     </Panel>
   )
 }
