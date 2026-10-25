@@ -11,8 +11,11 @@ from app.services.weather import (
     OPEN_METEO_URL,
     WeatherError,
     get_day_forecast,
+    get_hike_forecast,
     is_in_forecast_range,
+    merge_forecasts,
     sun_times,
+    utc_days_between,
     weather_code_text,
 )
 
@@ -168,3 +171,72 @@ def test_weather_code_text():
     assert weather_code_text(61) == "light rain"
     assert weather_code_text(95) == "thunderstorm"
     assert weather_code_text(42) == "unknown weather (code 42)"
+
+
+def utc(day: date, hour: int, minute: int = 0) -> datetime:
+    """A UTC datetime on `day`, for building hike windows in tests."""
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc)
+
+
+def payload_for_request(request: httpx.Request) -> httpx.Response:
+    """Answer each mocked call with the day it asked for (start_date)."""
+    day = date.fromisoformat(request.url.params["start_date"])
+    return httpx.Response(200, json=open_meteo_payload(day))
+
+
+def test_utc_days_between_one_and_two_days():
+    prev_day = date(2026, 10, 30)
+    assert utc_days_between(utc(HIKE_DAY, 9), utc(HIKE_DAY, 12)) == [HIKE_DAY]
+    assert utc_days_between(utc(prev_day, 23, 30), utc(HIKE_DAY, 2, 30)) == [prev_day, HIKE_DAY]
+    # Ending exactly at midnight needs no extra day.
+    assert utc_days_between(utc(prev_day, 21), utc(HIKE_DAY, 0)) == [prev_day]
+
+
+@respx.mock
+def test_hike_forecast_single_day_makes_one_call():
+    route = respx.get(url__startswith=OPEN_METEO_URL).mock(side_effect=payload_for_request)
+    fc = get_hike_forecast(LAT, LON, HIKE_DAY, utc(HIKE_DAY, 9), utc(HIKE_DAY, 13))
+    assert route.call_count == 1
+    assert len(fc.hourly) == 24
+    assert fc.extra_source_urls == []
+
+
+@respx.mock
+def test_hike_forecast_crossing_midnight_merges_both_days():
+    # Starts 23:00 UTC on the 31st, ends 02:00 UTC on 1 Nov.
+    next_day = date(2026, 11, 1)
+    route = respx.get(url__startswith=OPEN_METEO_URL).mock(side_effect=payload_for_request)
+    fc = get_hike_forecast(LAT, LON, HIKE_DAY, utc(HIKE_DAY, 23), utc(next_day, 2))
+
+    assert route.call_count == 2
+    asked = [call.request.url.params["start_date"] for call in route.calls]
+    assert asked == ["2026-10-31", "2026-11-01"]
+    assert len(fc.hourly) == 48
+    assert fc.hourly[0].time == utc(HIKE_DAY, 0)
+    assert fc.hourly[-1].time == utc(next_day, 23)
+    # The hike day still sets the daylight and the main source.
+    assert fc.day == HIKE_DAY
+    assert (fc.sunrise, fc.sunset) == sun_times(LAT, LON, HIKE_DAY)
+    assert fc.source_url == str(route.calls[0].request.url)
+    assert fc.extra_source_urls == [str(route.calls[1].request.url)]
+
+
+@respx.mock
+def test_neighbour_day_out_of_range_adds_no_hours():
+    # Hike day is today + 15; the next UTC day is out of range, so no call for it.
+    last_day, beyond = date(2026, 11, 8), date(2026, 11, 9)
+    route = respx.get(url__startswith=OPEN_METEO_URL).mock(side_effect=payload_for_request)
+    fc = get_hike_forecast(LAT, LON, last_day, utc(last_day, 23), utc(beyond, 1))
+    assert route.call_count == 1
+    assert len(fc.hourly) == 24
+    assert fc.extra_source_urls == []
+
+
+@respx.mock
+def test_merge_keeps_main_hour_when_both_have_it():
+    respx.get(url__startswith=OPEN_METEO_URL).mock(side_effect=payload_for_request)
+    main = get_day_forecast(LAT, LON, HIKE_DAY)
+    clash = main.model_copy(update={"hourly": [main.hourly[0].model_copy(update={"gust_kmh": 99.0})]})
+    merged = merge_forecasts(main, [clash])
+    assert len(merged.hourly) == 24
+    assert merged.hourly[0].gust_kmh == 25.0
