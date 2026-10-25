@@ -534,16 +534,15 @@ def test_research_hazards_uses_search_and_high_thinking(monkeypatch: pytest.Monk
     """Hazard research sends only the approved Interactions API arguments."""
     captured = {}
 
-    class FakeInteractions:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(steps=[])
+    def create_interaction(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(steps=[])
 
-    fake_client = SimpleNamespace(interactions=FakeInteractions())
-    monkeypatch.setattr(gemini, "get_client", lambda: fake_client)
+    monkeypatch.setattr(gemini, "create_interaction", create_interaction)
 
     assert gemini.research_hazards("Ridgeway", DAY, LAT, LON) == []
-    assert captured["model"] == "gemini-4-argon"
+    assert gemini.PLANNER_MODEL == gemini.ARGON
+    assert captured["model"] == gemini.PLANNER_MODEL
     assert captured["tools"] == [{"type": "google_search"}]
     assert captured["generation_config"] == {
         "thinking_level": gemini.HAZARD_THINKING_LEVEL
@@ -587,7 +586,7 @@ def test_draft_plan_uses_schema_and_parses_json(monkeypatch: pytest.MonkeyPatch)
     assert captured["generation_config"] == {
         "thinking_level": gemini.DRAFT_THINKING_LEVEL
     }
-    assert captured["model"] == "gemini-4-argon"
+    assert captured["model"] == gemini.PLANNER_MODEL
 
 
 def test_invalid_draft_json_raises_gemini_error(monkeypatch: pytest.MonkeyPatch):

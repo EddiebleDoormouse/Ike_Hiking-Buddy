@@ -1,13 +1,13 @@
-# Model use
+# Gemini model calls
 
-| Call | Model | Thinking level | Tools / output |
-|---|---|---|---|
-| `research_hazards` | `gemini-4-argon` | `high` | Google Search; URL citation annotations become sourced hazards |
-| `draft_plan` | `gemini-4-argon` | `high` | Structured JSON matching `PlanDraft` |
-| `revise_plan` | `gemini-4-argon` | `high`; `low` if the loop has already taken more than 45 seconds | Structured JSON matching `PlanDraft` |
+| function | model | thinking_level | why | latency |
+|---|---|---|---|---|
+| `ping_models` | `gemini-4-argon`, `gemini-3.8-flash` | low | Smoke test | not measured: no GEMINI_API_KEY on build VM |
+| `analyze_media` (DV-P1) | `gemini-3.8-flash` | low | Fast per-media caption + candidates | Not measured yet |
+| `research_hazards` / `draft_plan` / `revise_plan` (DV-P2) | `gemini-4-argon` | high | Planning research and checks loop | high: 154 s total (hazards 96 s, draft 57 s); medium 37 s; low 60 s (one run each) |
+| `recap` | `gemini-4-argon` | TBD | Long-context hike recap | TBD |
 
-All calls use the Gemini Interactions API. Do not set `temperature`, `top_p`,
-`top_k`, or `thinking_budget`.
+All calls go through the Interactions API in `backend/app/services/gemini.py`. Never set `temperature`, `top_p`, `top_k`, or `thinking_budget`.
 
 ## Progress
 
@@ -23,13 +23,21 @@ planning begins.
 
 ## Latency
 
-Live run, 25 Oct 2026, all calls at `high`, for a synthetic Chilterns hike (Tring to Ivinghoe Beacon, 13 km, 330 m ascent) on Sat 31 Oct:
+The high-thinking-level timing was measured on 25 Oct 2026 for a synthetic
+Chilterns hike (Tring to Ivinghoe Beacon, 13 km, 330 m ascent) on Sat 31 Oct.
+The summary row compares one run at each level. The high-level run had no
+revisions and all checks passed:
 
 | Step | ms |
 |---|---|
 | forecast (Open-Meteo) | 337 |
 | research_hazards | 96307 |
 | draft_plan | 57273 |
-| total (0 revisions, all checks passed) | 153917 |
+| total | 153917 |
 
-The hazard search accounts for most of the time. Any revision after this point would run at `low`, because the loop is already past 45 s.
+## Revision thinking-level fallback
+
+Hazard research and the initial draft use `high`. Revisions also use `high`
+unless the planner loop has exceeded 45 seconds; revisions then switch to
+`low`. These latency measurements are one run per level and should be treated
+as indicative, not conclusive.

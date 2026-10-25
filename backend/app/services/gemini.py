@@ -1,14 +1,18 @@
-"""Gemini Interactions API helpers for hiking plans and hazard research."""
+"""Shared Gemini Interactions API helpers."""
 
+import time
 from datetime import date
 from typing import Any
 
 from google import genai
 from pydantic import ValidationError
 
+from app.config import settings
 from app.services.planning import Hazard, PlanDraft, has_source_url
 
-PLANNER_MODEL = "gemini-4-argon"
+ARGON = "gemini-4-argon"
+FLASH = "gemini-3.8-flash"
+PLANNER_MODEL = ARGON
 HAZARD_THINKING_LEVEL = "high"
 DRAFT_THINKING_LEVEL = "high"
 
@@ -48,28 +52,6 @@ Return the full revised plan with the same JSON fields."""
 HAZARD_PROMPT = """Search the web for current information that affects walking the {trail_name} trail in the UK (start near {lat:.4f}, {lon:.4f}) on {day_text}.
 Look for: path closures or diversions, access restrictions, livestock (e.g. cattle with calves), military firing ranges, tide times for coastal sections, and major works or events.
 Report only items from reliable, recent sources (national park, National Trust, council, Ordnance Survey, MOD, tide tables). One short sentence per item. If you find nothing relevant, say so."""
-
-_client: genai.Client | None = None
-
-
-class GeminiError(Exception):
-    """Raised when a Gemini request or structured response is invalid."""
-
-
-def get_client() -> genai.Client:
-    """Return the cached Gemini client, creating it on first use."""
-    global _client
-    if _client is None:
-        _client = genai.Client()
-    return _client
-
-
-def create_interaction(**kwargs: Any) -> Any:
-    """Call the Interactions API and expose SDK failures as GeminiError."""
-    try:
-        return get_client().interactions.create(**kwargs)
-    except Exception as exc:
-        raise GeminiError(f"Gemini request failed: {exc}") from exc
 
 
 def parse_plan_draft(text: str | None) -> PlanDraft:
@@ -192,3 +174,67 @@ def research_hazards(
         generation_config={"thinking_level": HAZARD_THINKING_LEVEL},
     )
     return hazards_from_interaction(interaction)
+_client: genai.Client | None = None
+
+
+class GeminiError(Exception):
+    """Raised when a Gemini request or structured response is invalid."""
+
+
+def get_client() -> genai.Client:
+    """Return the cached Gemini client, creating it on first use."""
+    global _client
+    if _client is None:
+        if settings.GEMINI_API_KEY:
+            _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        else:
+            _client = genai.Client()
+    return _client
+
+
+def create_interaction(**kwargs: Any) -> Any:
+    """Call the Interactions API and expose SDK failures as GeminiError."""
+    try:
+        return get_client().interactions.create(**kwargs)
+    except Exception as exc:
+        raise GeminiError(f"Gemini request failed: {exc}") from exc
+
+
+def ping_models() -> dict[str, dict]:
+    """Smoke-test the configured Gemini models and report their latency."""
+    results = {}
+    for model in (ARGON, FLASH):
+        start_time = time.perf_counter()
+        try:
+            interaction = create_interaction(
+                model=model,
+                input="Reply with the single word OK.",
+                generation_config={"thinking_level": "low"},
+            )
+            reply = (getattr(interaction, "output_text", None) or "").strip()
+            latency_s = round(time.perf_counter() - start_time, 2)
+            if (
+                getattr(interaction, "status", None) == "failed"
+                or not reply
+            ):
+                results[model] = {
+                    "ok": False,
+                    "latency_s": latency_s,
+                    "error": "empty or failed reply",
+                    "reply": None,
+                }
+                continue
+            results[model] = {
+                "ok": True,
+                "latency_s": latency_s,
+                "error": None,
+                "reply": reply[:40],
+            }
+        except GeminiError as exc:
+            results[model] = {
+                "ok": False,
+                "latency_s": None,
+                "error": str(exc),
+                "reply": None,
+            }
+    return results

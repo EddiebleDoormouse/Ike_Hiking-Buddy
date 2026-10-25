@@ -11,6 +11,7 @@ from app.services.planning import (
     PlanDraft,
     all_passed,
     failed_summary,
+    hike_window_utc,
     leave_by,
     local_start_to_utc,
     missing_window_hours,
@@ -18,7 +19,7 @@ from app.services.planning import (
     run_checks,
     window_hours,
 )
-from app.services.weather import DayForecast, HourlyWeather, sun_times
+from app.services.weather import DayForecast, HourlyWeather, merge_forecasts, sun_times
 
 LAT, LON = 51.5074, -0.1278
 GMT_DAY = date(2026, 10, 31)  # after the clock change: local time == UTC
@@ -382,3 +383,36 @@ def test_all_hours_missing_gives_gap_sentence_only():
     checks = run(forecast=make_forecast(in_range=False))
     wind = check_named(checks, "Wind")
     assert wind.detail.startswith("The forecast is missing 3 of 3 hours of the hike")
+
+
+def test_hike_window_uses_longer_duration_and_uk_time():
+    # 09:00 BST on 24 Oct is 08:00 UTC; Naismith's 180 min beats the draft's 120.
+    start, end = hike_window_utc(make_draft(est=120), date(2026, 10, 24), DIST_KM, ASCENT_M)
+    assert start == datetime(2026, 10, 24, 8, tzinfo=timezone.utc)
+    assert end == start + timedelta(minutes=180)
+
+
+def test_hike_crossing_utc_midnight_passes_with_merged_forecast():
+    # 00:30 BST on 24 Oct is 23:30 UTC on the 23rd: merging the 23rd fills the gap.
+    day = date(2026, 10, 24)
+    forecast = merge_forecasts(make_forecast(day=day), [make_forecast(day=date(2026, 10, 23))])
+    checks = run(make_draft(start=time(0, 30)), forecast)
+    for name in ("Wind", "Rain", "Cold"):
+        assert check_named(checks, name).passed, check_named(checks, name).detail
+
+
+def test_merged_neighbour_day_hazard_is_caught():
+    # A 70 km/h gust at 23:00 UTC on the 23rd is inside a 00:30 BST start.
+    day = date(2026, 10, 24)
+    night_before = make_forecast(day=date(2026, 10, 23), overrides={23: {"gust_kmh": 70.0}})
+    forecast = merge_forecasts(make_forecast(day=day), [night_before])
+    wind = check_named(run(make_draft(start=time(0, 30)), forecast), "Wind")
+    assert not wind.passed and "70 km/h" in wind.detail
+
+
+def test_forecast_available_counts_only_hike_day_after_merge():
+    day = date(2026, 10, 24)
+    forecast = merge_forecasts(make_forecast(day=day), [make_forecast(day=date(2026, 10, 23))])
+    check = check_named(run(make_draft(start=time(0, 30)), forecast), "Forecast available")
+    assert check.passed
+    assert check.detail == "An hourly forecast with 24 hours is available for 2026-10-24."

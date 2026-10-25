@@ -81,6 +81,8 @@ class DayForecast(BaseModel):
     in_forecast_range: bool
     source_url: str
     fetched_at: datetime
+    # URLs of neighbouring days merged in by merge_forecasts (midnight hikes).
+    extra_source_urls: list[str] = []
 
 
 def weather_code_text(code: int) -> str:
@@ -207,3 +209,47 @@ def get_day_forecast(lat: float, lon: float, day: date) -> DayForecast:
         source_url=url,
         fetched_at=datetime.now(timezone.utc),
     )
+
+
+def utc_days_between(start_utc: datetime, end_utc: datetime) -> list[date]:
+    """List every UTC date that a hike from start_utc to end_utc touches.
+
+    Open-Meteo answers one UTC date per call, so a hike from 23:30 to 02:30
+    UTC needs two calls. A hike ending exactly at midnight stays on one day.
+    """
+    last = (end_utc - timedelta(microseconds=1)).date() if end_utc > start_utc else start_utc.date()
+    days = [start_utc.date()]
+    while days[-1] < last:
+        days.append(days[-1] + timedelta(days=1))
+    return days
+
+
+def merge_forecasts(main: DayForecast, others: list[DayForecast]) -> DayForecast:
+    """Add the hourly data of neighbouring days to the hike day's forecast.
+
+    Day, sunrise, sunset and in_forecast_range stay those of `main` (the hike
+    day). Hours are sorted by time and an hour already in `main` is kept.
+    """
+    by_time = {h.time: h for other in others for h in other.hourly}
+    by_time.update({h.time: h for h in main.hourly})
+    extra_urls = [other.source_url for other in others if other.hourly]
+    return main.model_copy(
+        update={
+            "hourly": [by_time[t] for t in sorted(by_time)],
+            "extra_source_urls": main.extra_source_urls + extra_urls,
+        }
+    )
+
+
+def get_hike_forecast(
+    lat: float, lon: float, day: date, start_utc: datetime, end_utc: datetime
+) -> DayForecast:
+    """Get the forecast for a hike, fetching a neighbouring day if needed.
+
+    `day` is the hike's local date (it sets sunrise/sunset). If the hike runs
+    into another UTC date (e.g. a night hike), that day is fetched too and
+    merged in, so every hour of the hike can be checked.
+    """
+    main = get_day_forecast(lat, lon, day)
+    others = [get_day_forecast(lat, lon, d) for d in utc_days_between(start_utc, end_utc) if d != day]
+    return merge_forecasts(main, others) if others else main
