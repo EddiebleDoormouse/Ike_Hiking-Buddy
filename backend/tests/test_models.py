@@ -23,6 +23,8 @@ from app.models import (
     UploadMediaResponse,
     Verification,
     from_mongo,
+    oid_to_str,
+    to_mongo,
 )
 
 
@@ -129,6 +131,24 @@ def test_candidate_confidence_is_bounded():
             confidence=1.5,
             group="bird",
         )
+
+
+def test_oid_to_str_converts_object_id():
+    """ObjectIds can be converted to their public string form."""
+    object_id = ObjectId()
+
+    assert oid_to_str(object_id) == str(object_id)
+
+
+def test_to_mongo_drops_id_and_preserves_other_values():
+    """MongoDB write data excludes the public id but keeps other fields."""
+    data = {"id": "hike-1", "title": "Morning walk", "stats": {"distance_km": 4}}
+
+    assert to_mongo(data) == {
+        "title": "Morning walk",
+        "stats": {"distance_km": 4},
+    }
+    assert data["id"] == "hike-1"
 
 
 def test_from_mongo_converts_object_ids():
