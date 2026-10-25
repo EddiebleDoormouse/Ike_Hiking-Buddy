@@ -13,8 +13,10 @@ from app.services.planning import Hazard, PlanDraft, has_source_url
 ARGON = "gemini-4-argon"
 FLASH = "gemini-3.8-flash"
 PLANNER_MODEL = ARGON
-HAZARD_THINKING_LEVEL = "high"
-DRAFT_THINKING_LEVEL = "high"
+# Live runs (25 Oct): high took 154 s for the whole loop, medium 37 s.
+# Medium keeps the live demo under a minute; set PLAN_THINKING_LEVEL=high in .env to change it.
+HAZARD_THINKING_LEVEL = settings.PLAN_THINKING_LEVEL
+DRAFT_THINKING_LEVEL = settings.PLAN_THINKING_LEVEL
 
 PLANNER_SYSTEM = """You are Hiking Buddy, a careful UK hiking planner. You write a suggested plan, not a guarantee: always tell the hiker to check conditions before they go.
 The hiker is less experienced, so explain choices simply and favour safe, conservative options.

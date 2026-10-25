@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     PLANTNET_API_KEY: str | None = None
     KINDWISE_MUSHROOM_API_KEY: str | None = None
     MEDIA_MODEL: str = "gemini-3.8-flash"
+    PLAN_THINKING_LEVEL: str = "medium"
     ALLOWED_ORIGINS: str = "http://localhost:5173"
 
     def allowed_origins_list(self) -> list[str]:
