@@ -726,6 +726,44 @@ def test_audio_display_variant_falls_back_to_original(
     assert response.headers["content-type"] == "audio/mpeg"
 
 
+def test_unicode_audio_filename_uses_rfc5987(client, monkeypatch):
+    hike_id = create_hike(client).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("trail%E2%98%80.mp3", b"audio", "audio/mpeg")},
+    )
+    assert upload.status_code == 201
+
+    response = client.get(f"/media/{upload.json()['media']['id']}/file")
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert disposition.isascii()
+    assert 'filename="trail.mp3"' in disposition
+    assert "filename*=UTF-8''trail%E2%98%80.mp3" in disposition
+
+
+def test_unicode_photo_original_filename_uses_rfc5987(client, monkeypatch):
+    hike_id = create_hike(client).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("café☀.jpg", make_jpeg((80, 60)), "image/jpeg")},
+    )
+    assert upload.status_code == 201
+
+    response = client.get(
+        f"/media/{upload.json()['media']['id']}/file?variant=original"
+    )
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert disposition.isascii()
+    assert 'filename="caf.jpg"' in disposition
+    assert "filename*=UTF-8''caf%C3%A9%E2%98%80.jpg" in disposition
+
+
 @pytest.mark.skipif(
     not os.environ.get("MONGODB_URI"),
     reason="no MONGODB_URI",

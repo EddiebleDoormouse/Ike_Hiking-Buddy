@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -157,6 +157,15 @@ def _safe_filename(name: str) -> str:
     """Remove path components and header-sensitive characters from a filename."""
     filename = Path(unquote(name).replace("\\", "/")).name
     return filename.replace('"', "").replace("\r", "").replace("\n", "")
+
+
+def _content_disposition(name: str) -> str:
+    """Build a Latin-1-safe disposition with RFC 5987 for Unicode names."""
+    safe = _safe_filename(name)
+    fallback = safe.encode("ascii", "ignore").decode() or "file"
+    if safe.isascii():
+        return f'inline; filename="{safe}"'
+    return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{quote(safe)}"
 
 
 @router.post(
@@ -433,13 +442,11 @@ def get_media_file(
         raise HTTPException(status_code=404, detail="Media file not found") from exc
 
     if is_safe_photo_original:
-        filename = _safe_filename(
-            f"{Path(document['filename']).stem or 'image'}.jpg"
-        )
+        filename = f"{Path(document['filename']).stem or 'image'}.jpg"
         return StreamingResponse(
             _stream_chunks(stream),
             media_type="image/jpeg",
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+            headers={"Content-Disposition": _content_disposition(filename)},
         )
 
     if is_legacy_photo_original:
@@ -452,13 +459,11 @@ def get_media_file(
             document["filename"],
             max_px=4096,
         )
-        filename = _safe_filename(
-            f"{Path(document['filename']).stem or 'image'}.jpg"
-        )
+        filename = f"{Path(document['filename']).stem or 'image'}.jpg"
         return Response(
             content=safe_image,
             media_type="image/jpeg",
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+            headers={"Content-Disposition": _content_disposition(filename)},
         )
 
     if is_jpeg_variant:
@@ -467,9 +472,8 @@ def get_media_file(
     else:
         media_type = document["mime"]
         filename = document["filename"]
-    filename = _safe_filename(filename)
     return StreamingResponse(
         _stream_chunks(stream),
         media_type=media_type,
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
