@@ -1,7 +1,6 @@
 """Hike recap route: packs a whole hike into one Argon long-context call."""
 
 import base64
-import io
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -10,11 +9,11 @@ from zoneinfo import ZoneInfo
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException
-from PIL import Image
 
 from app import db
 from app.models import RecapResponse
 from app.services import gemini
+from app.services.images import to_display_jpeg
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -114,27 +113,21 @@ def _route_summary(hike: dict) -> dict[str, str | None]:
     }
 
 
-def _downsize_jpeg(data: bytes, max_px: int = RECAP_IMAGE_MAX_PX) -> bytes:
-    """Re-encode an image as JPEG with its longest edge at most max_px."""
-    image = Image.open(io.BytesIO(data)).convert("RGB")
-    image.thumbnail((max_px, max_px))
-    out = io.BytesIO()
-    image.save(out, format="JPEG", quality=85)
-    return out.getvalue()
-
-
 def _display_jpeg_b64(bucket: Any, media_doc: dict) -> str | None:
     """Fetch a media item's display JPEG from GridFS, downsized, as base64.
 
-    Missing or unreadable files are skipped with a warning so one bad
-    upload can't sink the whole recap.
+    Reuses the upload pipeline's JPEG encoder so orientation and EXIF
+    handling match what was stored. Missing or unreadable files are
+    skipped with a warning so one bad upload can't sink the whole recap.
     """
     file_id = media_doc.get("display_file_id")
     if not file_id:
         return None
     try:
-        stream = bucket.open_download_stream(ObjectId(str(file_id)))
-        data = stream.read()
+        data = bucket.open_download_stream(ObjectId(str(file_id))).read()
+        small = to_display_jpeg(
+            data, media_doc.get("filename") or "photo.jpg", RECAP_IMAGE_MAX_PX
+        )
     except Exception as exc:
         logger.warning(
             "recap: skipping media %s, display file unreadable: %s",
@@ -142,7 +135,6 @@ def _display_jpeg_b64(bucket: Any, media_doc: dict) -> str | None:
             exc,
         )
         return None
-    small = _downsize_jpeg(data)
     return base64.b64encode(small).decode("ascii")
 
 

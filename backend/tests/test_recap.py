@@ -15,6 +15,7 @@ from app.config import settings
 from app.main import app
 from app.routers import recap as recap_router
 from app.services import gemini
+from app.services.images import to_display_jpeg
 
 client = TestClient(app)
 
@@ -337,9 +338,11 @@ def test_recap_service_reports_usage(monkeypatch):
     assert result["usage"]["total_tokens"] == 5630
 
 
-def test_downsize_jpeg_caps_long_edge():
-    """Display images are re-encoded no larger than 768 px on the long edge."""
-    raw = recap_router._downsize_jpeg(make_jpeg(2000, 1000))
+def test_recap_images_cap_long_edge_at_768():
+    """The 768 px cap is applied through the shared JPEG encoder."""
+    raw = to_display_jpeg(
+        make_jpeg(2000, 1000), "photo.jpg", recap_router.RECAP_IMAGE_MAX_PX
+    )
     image = Image.open(io.BytesIO(raw))
 
     assert image.format == "JPEG"
