@@ -901,13 +901,41 @@ def test_plan_router_returns_404_for_missing_based_on_hike():
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Based-on hike not found"
-    assert "plan_progress" not in hike
+    assert hike["plan_progress"]["stage"] == "error"
+    assert hike["plan_progress"]["message"] == "Based-on hike not found."
+    assert [event["stage"] for event in hike["plan_events"]][-1] == "error"
     progress_response = client.get("/hikes/hike-1/plan/progress")
-    assert progress_response.json() == {
-        "stage": "idle",
-        "message": "Not started",
-        "events": [],
-    }
+    assert progress_response.json()["stage"] == "error"
+    assert [event["stage"] for event in progress_response.json()["events"]] == [
+        "queued",
+        "error",
+    ]
+
+
+def test_plan_router_records_error_when_sightings_lookup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A failed sightings lookup records an event before propagating."""
+    hike = make_hike()
+    hike["based_on_hike_id"] = "base-1"
+    based_on = {"_id": "base-1"}
+    database = FakeDatabase([hike, based_on], [])
+    client = make_client(database)
+
+    def fail_sightings(query: dict) -> list[dict]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(database["sightings"], "find", fail_sightings)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        client.post("/hikes/hike-1/plan")
+
+    assert hike["plan_progress"]["stage"] == "error"
+    assert hike["plan_progress"]["message"] == "Sightings could not be loaded."
+    assert [event["stage"] for event in hike["plan_events"]] == [
+        "queued",
+        "error",
+    ]
 
 
 def test_plan_router_returns_400_for_missing_start_and_route_stats():

@@ -77,26 +77,6 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         raise HTTPException(status_code=404, detail="Hike not found")
 
     run_id = uuid4().hex
-    based_on = None
-    based_on_id = hike.get("based_on_hike_id")
-    if based_on_id is not None:
-        based_on = find_hike(db, str(based_on_id))
-        if based_on is None:
-            raise HTTPException(status_code=404, detail="Based-on hike not found")
-    sightings = (
-        list(
-            db["sightings"].find(
-                {
-                    "hike_id": {
-                        "$in": [based_on["_id"], str(based_on["_id"])]
-                    }
-                }
-            )
-        )
-        if based_on
-        else []
-    )
-
     started = perf_counter()
     queued_progress = {
         "stage": "queued",
@@ -117,6 +97,46 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
             }
         },
     )
+
+    based_on = None
+    based_on_id = hike.get("based_on_hike_id")
+    if based_on_id is not None:
+        based_on = find_hike(db, str(based_on_id))
+        if based_on is None:
+            _save_progress(
+                db,
+                hike["_id"],
+                run_id,
+                _error_progress(
+                    "Based-on hike not found.", 0, [], started, run_id
+                ),
+            )
+            raise HTTPException(status_code=404, detail="Based-on hike not found")
+
+    try:
+        sightings = (
+            list(
+                db["sightings"].find(
+                    {
+                        "hike_id": {
+                            "$in": [based_on["_id"], str(based_on["_id"])]
+                        }
+                    }
+                )
+            )
+            if based_on
+            else []
+        )
+    except Exception:
+        _save_progress(
+            db,
+            hike["_id"],
+            run_id,
+            _error_progress(
+                "Sightings could not be loaded.", 0, [], started, run_id
+            ),
+        )
+        raise
 
     latest_progress: dict[str, Any] = {"revision": 0, "failed": []}
 
