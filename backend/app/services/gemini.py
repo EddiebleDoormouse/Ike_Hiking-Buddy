@@ -42,20 +42,35 @@ def ping_models() -> dict[str, dict]:
     for model in (ARGON, FLASH):
         start_time = time.perf_counter()
         try:
-            create_interaction(
+            interaction = create_interaction(
                 model=model,
                 input="Reply with the single word OK.",
                 generation_config={"thinking_level": "low"},
             )
+            reply = (getattr(interaction, "output_text", None) or "").strip()
+            latency_s = round(time.perf_counter() - start_time, 2)
+            if (
+                getattr(interaction, "status", None) == "failed"
+                or not reply
+            ):
+                results[model] = {
+                    "ok": False,
+                    "latency_s": latency_s,
+                    "error": "empty or failed reply",
+                    "reply": None,
+                }
+                continue
             results[model] = {
                 "ok": True,
-                "latency_s": round(time.perf_counter() - start_time, 2),
+                "latency_s": latency_s,
                 "error": None,
+                "reply": reply[:40],
             }
         except GeminiError as exc:
             results[model] = {
                 "ok": False,
                 "latency_s": None,
                 "error": str(exc),
+                "reply": None,
             }
     return results
