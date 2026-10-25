@@ -176,4 +176,5 @@ export type PlanProgress = {
   elapsed_ms?: number
   updated_at?: string
   run_id?: string
+  events?: PlanProgress[]
 }

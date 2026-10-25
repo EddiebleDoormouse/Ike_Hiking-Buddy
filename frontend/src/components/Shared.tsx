@@ -89,7 +89,12 @@ export function PlanProgressLoader({ hikeId, label }: { hikeId?: string; label: 
     let cancelled = false
     async function poll() {
       const progress = await getPlanProgress(hikeId as string)
-      if (cancelled || !progress || progress.stage === 'idle' || progress.stage === 'queued') return
+      if (cancelled || !progress) return
+      if (progress.events) {
+        setHistory(progress.events.filter((event) => event.stage !== 'idle' && event.stage !== 'queued'))
+        return
+      }
+      if (progress.stage === 'idle' || progress.stage === 'queued') return
       setHistory((steps) => {
         const last = steps.at(-1)
         return last && sameStep(last, progress) ? [...steps.slice(0, -1), progress] : [...steps, progress]
@@ -113,8 +118,8 @@ export function PlanProgressLoader({ hikeId, label }: { hikeId?: string; label: 
         {history.map((step, index) => {
           const isCurrent = index === history.length - 1 && step.stage !== 'done'
           const hasFailures = step.stage === 'checks' && (step.failed?.length ?? 0) > 0
-          const className = isCurrent ? 'current' : hasFailures ? 'failed' : 'done'
-          const marker = isCurrent ? '◌' : hasFailures ? '✕' : '✓'
+          const className = hasFailures ? 'failed' : isCurrent ? 'current' : 'done'
+          const marker = hasFailures ? '✕' : isCurrent ? '◌' : '✓'
           return (
             <li className={className} key={`${index}-${step.stage}`}>
               {marker} {step.message}
