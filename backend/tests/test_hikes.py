@@ -8,12 +8,33 @@ import pytest
 
 from app.db import get_db, get_files
 from app.main import app
-from test_media import FakeBucket, FakeDB
+from test_media import FakeBucket, FakeCollection, FakeDB
+
+
+class ProjectedFakeCollection(FakeCollection):
+    """Support the inclusion projection used by the hike-card route."""
+
+    def find(self, filters, projection=None):
+        documents = super().find(filters)
+        if projection is None:
+            return documents
+        return [
+            {
+                "_id": document["_id"],
+                "verification": {
+                    "chosen": (document.get("verification") or {}).get("chosen")
+                },
+                "candidates": document.get("candidates", []),
+            }
+            for document in documents
+        ]
 
 
 @pytest.fixture
 def fake_db():
-    return FakeDB()
+    database = FakeDB()
+    database.sightings = ProjectedFakeCollection()
+    return database
 
 
 @pytest.fixture
@@ -45,6 +66,16 @@ def create_hike(client, hike_date="2026-10-24", title="Autumn loop"):
     )
 
 
+def species_count_for(client, hike_id):
+    response = client.get("/hikes")
+    assert response.status_code == 200
+    return next(
+        card["species_count"]
+        for card in response.json()
+        if card["id"] == hike_id
+    )
+
+
 def make_media(hike_id, kind, created_at, filename="walk.jpg"):
     return {
         "hike_id": hike_id,
@@ -64,14 +95,20 @@ def make_media(hike_id, kind, created_at, filename="walk.jpg"):
     }
 
 
-def make_sighting(hike_id, created_at, status="unsure"):
+def make_sighting(
+    hike_id,
+    created_at,
+    status="unsure",
+    chosen=None,
+    candidates=None,
+):
     return {
         "hike_id": hike_id,
         "media_id": ObjectId(),
-        "candidates": [],
+        "candidates": candidates if candidates is not None else [],
         "verification": {
             "status": status,
-            "chosen": None,
+            "chosen": chosen,
             "gbif_nearby_count": None,
             "gbif_key": None,
             "specialist": None,
@@ -144,15 +181,28 @@ def test_hike_cards_cover_species_stats_and_date_sort(
             "song.mp3",
         )
     )
-    fake_db.sightings.insert_one(make_sighting(newer_oid, datetime.now(timezone.utc)))
+    fake_db.sightings.insert_one(
+        make_sighting(
+            newer_oid,
+            datetime.now(timezone.utc),
+            chosen={"scientific_name": "Cyanistes caeruleus"},
+        )
+    )
     fake_db.sightings.insert_one(
         make_sighting(
             newer_oid,
             datetime.now(timezone.utc),
             status="not_applicable",
+            chosen={"scientific_name": "Turdus merula"},
         )
     )
-    fake_db.sightings.insert_one(make_sighting(older_oid, datetime.now(timezone.utc)))
+    fake_db.sightings.insert_one(
+        make_sighting(
+            older_oid,
+            datetime.now(timezone.utc),
+            chosen={"scientific_name": "Erithacus rubecula"},
+        )
+    )
 
     response = client.get("/hikes")
 
@@ -167,6 +217,44 @@ def test_hike_cards_cover_species_stats_and_date_sort(
     assert cards[1]["species_count"] == 1
     assert cards[1]["distance_km"] == 4.5
     assert cards[1]["ascent_m"] == 120
+
+
+def test_species_count_is_distinct_and_uses_top_candidate(client, fake_db):
+    hike = create_hike(client).json()
+    hike_oid = ObjectId(hike["id"])
+    created_at = datetime.now(timezone.utc)
+
+    def add_sighting(status="unsure", chosen=None, candidates=None):
+        fake_db.sightings.insert_one(
+            make_sighting(
+                hike_oid,
+                created_at,
+                status=status,
+                chosen=chosen,
+                candidates=candidates,
+            )
+        )
+
+    add_sighting(chosen={"scientific_name": "Cyanistes caeruleus"})
+    add_sighting(chosen={"scientific_name": " cyanistes  CAERULEUS"})
+    assert species_count_for(client, hike["id"]) == 1
+
+    add_sighting(chosen={"scientific_name": "Erithacus rubecula"})
+    assert species_count_for(client, hike["id"]) == 2
+
+    add_sighting(
+        status="not_applicable",
+        chosen={"scientific_name": "Turdus merula"},
+    )
+    add_sighting()
+    add_sighting(chosen={"scientific_name": " \t "})
+    assert species_count_for(client, hike["id"]) == 2
+
+    add_sighting(
+        chosen=None,
+        candidates=[{"scientific_name": "Hedera helix"}],
+    )
+    assert species_count_for(client, hike["id"]) == 3
 
 
 def test_get_hike_detail_sorts_media_and_sightings(client, fake_db):

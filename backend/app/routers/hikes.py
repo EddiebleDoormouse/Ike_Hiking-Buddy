@@ -27,6 +27,30 @@ def hike_from_doc(document: dict) -> Hike:
     return Hike.model_validate(values)
 
 
+def _species_key(sighting: dict) -> str | None:
+    """Return a normalized scientific name for a sighting."""
+    verification = sighting.get("verification") or {}
+    chosen = verification.get("chosen")
+    name = (
+        chosen.get("scientific_name")
+        if isinstance(chosen, dict)
+        else None
+    )
+    if name is None:
+        # Until D4 sets chosen, use the top candidate as the fallback key.
+        candidates = sighting.get("candidates") or []
+        candidate = candidates[0] if candidates else None
+        name = (
+            candidate.get("scientific_name")
+            if isinstance(candidate, dict)
+            else None
+        )
+    if not isinstance(name, str):
+        return None
+    key = " ".join(name.split()).casefold()
+    return key or None
+
+
 def _object_id(hike_id: str) -> ObjectId:
     """Parse a hike id or return the standard not-found response."""
     try:
@@ -98,12 +122,18 @@ def list_hikes(db: Database = Depends(get_db)) -> list[HikeCard]:
             key=lambda photo: _sort_datetime(photo.get("created_at"))
         )
         stats = document.get("stats") or {}
-        species_count = db.sightings.count_documents(
+        species_keys = set()
+        sightings = db.sightings.find(
             {
                 "hike_id": hike_id,
                 "verification.status": {"$ne": "not_applicable"},
-            }
+            },
+            {"verification.chosen": 1, "candidates": 1},
         )
+        for sighting in sightings:
+            key = _species_key(sighting)
+            if key is not None:
+                species_keys.add(key)
         cards.append(
             HikeCard(
                 id=str(hike_id),
@@ -115,7 +145,7 @@ def list_hikes(db: Database = Depends(get_db)) -> list[HikeCard]:
                 cover_media_id=str(photos[0]["_id"]) if photos else None,
                 distance_km=stats.get("distance_km"),
                 ascent_m=stats.get("ascent_m"),
-                species_count=species_count,
+                species_count=len(species_keys),
             )
         )
     return cards
