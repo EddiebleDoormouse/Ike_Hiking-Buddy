@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   getHike,
@@ -14,8 +14,8 @@ import type {
   MediaItem,
   Plan,
   Sighting,
-  UploadMediaResponse,
 } from '../api/types'
+import { Masonry, RouteTrace, Waveform, type BoardEntry } from '../components/Board'
 import MapView from '../components/MapView'
 import { formatDate, formatDuration, formatLeaveBy, getSightingName } from '../components/format'
 import {
@@ -28,7 +28,28 @@ import {
   StepLoader,
 } from '../components/Shared'
 
-type TabName = 'overview' | 'media' | 'sightings' | 'plan' | 'recap'
+type Filter = 'all' | 'photos' | 'sightings' | 'sounds' | 'notes' | 'docs'
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all', label: 'Everything' },
+  { key: 'photos', label: 'Photos' },
+  { key: 'sightings', label: 'Sightings' },
+  { key: 'sounds', label: 'Sounds' },
+  { key: 'notes', label: 'Notes' },
+  { key: 'docs', label: 'Plan & route' },
+]
+
+/** Old `?tab=` links (NewHike, Search) still land somewhere sensible. */
+function legacyOpen(tab: string | null): string | null {
+  if (tab === 'plan') return 'plan'
+  if (tab === 'recap') return 'recap'
+  if (tab === 'overview') return 'route'
+  return null
+}
+
+function plainText(markdown: string): string {
+  return markdown.replace(/[#>*_`|[\]()-]/g, ' ').replace(/\s+/g, ' ').trim()
+}
 
 function HikeFolder() {
   const { id = '' } = useParams()
@@ -40,14 +61,15 @@ function HikeFolder() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
-  const [uploadResult, setUploadResult] = useState<UploadMediaResponse | null>(null)
   const [planning, setPlanning] = useState(false)
   const [planError, setPlanError] = useState('')
   const [recapping, setRecapping] = useState(false)
   const [recapError, setRecapError] = useState('')
   const [kitState, setKitState] = useState<Record<string, boolean>>({})
+  const [filter, setFilter] = useState<Filter>(params.get('tab') === 'sightings' ? 'sightings' : params.get('tab') === 'media' ? 'photos' : 'all')
 
-  const tab = (params.get('tab') as TabName | null) ?? 'overview'
+  const open = params.get('open') ?? legacyOpen(params.get('tab'))
+
   const load = useCallback(async () => {
     try {
       const [loaded, hikeCards] = await Promise.all([getHike(id), listHikes()])
@@ -70,9 +92,9 @@ function HikeFolder() {
     [hike, hikes],
   )
 
-  function changeTab(nextTab: TabName) {
-    if (nextTab === 'overview') setParams({})
-    else setParams({ tab: nextTab })
+  function openItem(key: string | null) {
+    if (key) setParams({ open: key })
+    else setParams({})
   }
 
   function retryLoad() {
@@ -90,7 +112,6 @@ function HikeFolder() {
     setUploadError('')
     try {
       const result = await uploadMedia(hike.id, file, setUploadProgress)
-      setUploadResult(result)
       setDetail((current) => current ? {
         ...current,
         media: [result.media, ...current.media.filter((item) => item.id !== result.media.id)],
@@ -98,6 +119,7 @@ function HikeFolder() {
           ? [result.sighting, ...current.sightings.filter((item) => item.id !== result.sighting?.id)]
           : current.sightings,
       } : current)
+      openItem(`m-${result.media.id}`)
     } catch (uploadFailure) {
       setUploadError(uploadFailure instanceof Error ? uploadFailure.message : 'Could not upload this file.')
     } finally {
@@ -137,57 +159,90 @@ function HikeFolder() {
   if (error || !detail) return <ErrorBox message={error || 'Hike not found.'} retry={retryLoad} />
   if (!hike) return <ErrorBox message="Hike details are missing." retry={retryLoad} />
 
-  const tabs: { key: TabName; label: string }[] = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'media', label: 'Media' },
-    { key: 'sightings', label: 'Sightings' },
-    ...(hike.status === 'planned' ? [{ key: 'plan' as const, label: 'Plan' }] : []),
-    { key: 'recap', label: 'Recap' },
-  ]
-  const isValidTab = tabs.some((item) => item.key === tab)
-  const activeTab = isValidTab ? tab : 'overview'
+  const sightingFor = (mediaId: string) => detail.sightings.find((item) => item.media_id === mediaId) ?? null
+  const stats = hike.stats
+  const facts = [
+    formatDate(hike.date),
+    stats?.distance_km != null ? `${stats.distance_km.toFixed(1)} km` : null,
+    stats?.ascent_m != null ? `${Math.round(stats.ascent_m)} m climbed` : null,
+    formatDuration(stats?.duration_s) ? `${formatDuration(stats?.duration_s)} h out` : null,
+    detail.media.length ? `${detail.media.length} ${detail.media.length === 1 ? 'item' : 'items'}` : null,
+  ].filter(Boolean) as string[]
 
-  return (
-    <>
-      <div className="page-heading detail-heading">
-        <div>
-          <span className="eyebrow">{hike.trail_name}</span>
-          <h1 className="detail-title">{hike.title}</h1>
-          <p className="subheading">{hike.hiker} <span aria-hidden="true">·</span> {formatDate(hike.date)}</p>
-          {hike.based_on_hike_id && (
-            <p className="detail-links">
-              Based on <Link to={`/hikes/${hike.based_on_hike_id}`}>{baseHike?.title ?? 'a previous hike'}</Link>
-            </p>
-          )}
-        </div>
-        <StatusBadge status={hike.status} />
-      </div>
-      <nav className="tab-row" aria-label="Hike sections">
-        {tabs.map((item) => (
-          <button
-            aria-current={activeTab === item.key ? 'page' : undefined}
-            className={`tab ${activeTab === item.key ? 'active' : ''}`}
-            key={item.key}
-            onClick={() => changeTab(item.key)}
-            type="button"
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      {activeTab === 'overview' && <Overview detail={detail} />}
-      {activeTab === 'media' && (
-        <MediaSection
-          detail={detail}
-          onUpload={onUpload}
-          uploadError={uploadError}
-          uploadProgress={uploadProgress}
-          uploadResult={uploadResult}
-          uploading={uploading}
-        />
-      )}
-      {activeTab === 'sightings' && <SightingsSection detail={detail} />}
-      {activeTab === 'plan' && hike.status === 'planned' && (
+  // ---- build the board -------------------------------------------------
+  const docs: (BoardEntry & { filter: Filter[] })[] = []
+  if (hike.route || stats) {
+    docs.push({
+      key: 'route', weight: 1.0, filter: ['docs'],
+      node: <RouteTile detail={detail} onOpen={() => openItem('route')} />,
+    })
+  }
+  if (hike.status === 'planned') {
+    docs.push({
+      key: 'plan', weight: plan ? 1.05 : 0.7, filter: ['docs'],
+      node: <PlanTile plan={plan} planning={planning} onOpen={() => openItem('plan')} />,
+    })
+  }
+  if (hike.status === 'completed') docs.push({
+    key: 'recap', weight: hike.recap_md ? 0.9 : 0.5, filter: ['docs'],
+    node: <RecapTile recap={hike.recap_md} onOpen={() => openItem('recap')} />,
+  })
+
+  const mediaEntries = [...detail.media]
+    .sort((a, b) => (a.taken_at ?? a.created_at).localeCompare(b.taken_at ?? b.created_at))
+    .map((item): BoardEntry & { filter: Filter[] } => {
+      const sighting = sightingFor(item.id)
+      const tags: Filter[] = []
+      if (item.kind === 'photo' || item.kind === 'video') tags.push('photos')
+      if (item.kind === 'audio') tags.push('sounds')
+      if (item.kind === 'note') tags.push('notes')
+      if (sighting && sighting.verification.status !== 'not_applicable') tags.push('sightings')
+      const weight = item.kind === 'photo' ? 0.8 + ((item.id.charCodeAt(item.id.length - 1) % 3) * 0.18)
+        : item.kind === 'audio' ? 0.5
+          : item.kind === 'note' ? 0.45 + Math.min(0.5, (item.text?.length ?? 0) / 500)
+            : 0.75
+      return {
+        key: item.id, weight, filter: tags,
+        node: <MediaTile item={item} sighting={sighting} onOpen={() => openItem(`m-${item.id}`)} />,
+      }
+    })
+
+  const uploadEntry: BoardEntry & { filter: Filter[] } = {
+    key: 'upload', weight: 0.5, filter: ['photos', 'sounds', 'sightings'],
+    node: (
+      <label className={`tile tile-new tile-upload ${uploading ? 'busy' : ''}`}>
+        {uploading ? (
+          <>
+            <span>Reading your file… {uploadProgress}%</span>
+            <div className="upload-progress"><div style={{ width: `${uploadProgress}%` }} /></div>
+            <span className="tile-new-hint">Gemini is captioning and identifying</span>
+          </>
+        ) : (
+          <>
+            <span className="tile-new-plus" aria-hidden="true">+</span>
+            <span>Add a photo or sound</span>
+            <span className="tile-new-hint">We'll caption it and check any species</span>
+          </>
+        )}
+        <input accept="image/*,audio/*" hidden onChange={onUpload} type="file" disabled={uploading} />
+      </label>
+    ),
+  }
+
+  const all = [docs[0], uploadEntry, ...docs.slice(1), ...mediaEntries].filter(Boolean)
+  const visible = all.filter((entry) => filter === 'all' || entry.filter.includes(filter))
+  const countFor = (key: Filter) => key === 'all'
+    ? docs.length + mediaEntries.length
+    : [...docs, ...mediaEntries].filter((entry) => entry.filter.includes(key)).length
+
+  // ---- sheet contents --------------------------------------------------
+  let sheet: { title: string; kicker: string; body: ReactNode } | null = null
+  if (open === 'route') {
+    sheet = { title: hike.trail_name || 'Route', kicker: 'Route and stats', body: <RouteSheet detail={detail} /> }
+  } else if (open === 'plan' && hike.status === 'planned') {
+    sheet = {
+      title: 'Plan for the day', kicker: formatDate(hike.date),
+      body: (
         <PlanSection
           error={planError}
           kitState={kitState}
@@ -196,20 +251,219 @@ function HikeFolder() {
           plan={plan}
           planning={planning}
         />
-      )}
-      {activeTab === 'recap' && (
-        <RecapSection
-          error={recapError}
-          onGenerate={() => void generateRecap()}
-          recap={hike.recap_md}
-          recapping={recapping}
-        />
+      ),
+    }
+  } else if (open === 'recap') {
+    sheet = {
+      title: 'Recap', kicker: hike.title,
+      body: <RecapSection error={recapError} onGenerate={() => void generateRecap()} recap={hike.recap_md} recapping={recapping} />,
+    }
+  } else if (open?.startsWith('m-')) {
+    const item = detail.media.find((media) => media.id === open.slice(2))
+    if (item) {
+      const sighting = sightingFor(item.id)
+      const name = sighting && sighting.verification.status !== 'not_applicable' ? getSightingName(sighting).common : null
+      sheet = {
+        title: name ?? (item.kind === 'note' ? 'Note' : item.kind === 'audio' ? 'Recording' : 'Photo'),
+        kicker: item.taken_at ? new Date(item.taken_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : item.filename,
+        body: <MediaSheet item={item} sighting={sighting} />,
+      }
+    }
+  }
+
+  return (
+    <>
+      <header className="folder-head">
+        <Link to="/" className="back-link">All hikes</Link>
+        <div className="folder-title-row">
+          <h1>{hike.title}</h1>
+          <StatusBadge status={hike.status} />
+        </div>
+        <p className="folder-sub">
+          {hike.trail_name}{hike.hiker ? `, with ${hike.hiker}` : ''}
+          {hike.based_on_hike_id && (
+            <span className="based-on">Based on <Link to={`/hikes/${hike.based_on_hike_id}`}>{baseHike?.title ?? 'a previous hike'}</Link></span>
+          )}
+        </p>
+        <ul className="folder-facts">{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+      </header>
+
+      <div className="board-bar">
+        <div className="filter-chips" role="tablist" aria-label="Filter this hike">
+          {FILTERS.map((item) => {
+            const count = countFor(item.key)
+            if (item.key !== 'all' && count === 0) return null
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                aria-selected={filter === item.key}
+                className={`chip ${filter === item.key ? 'on' : ''}`}
+                onClick={() => setFilter(item.key)}
+              >
+                {item.label}<span className="chip-count">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {uploadError && <div style={{ marginBottom: 16 }}><ErrorBox message={uploadError} /></div>}
+      <Masonry items={visible} />
+
+      {sheet && (
+        <Sheet title={sheet.title} kicker={sheet.kicker} onClose={() => openItem(null)}>
+          {sheet.body}
+        </Sheet>
       )}
     </>
   )
 }
 
-function Overview({ detail }: { detail: HikeDetail }) {
+// ---- tiles ---------------------------------------------------------------
+
+function RouteTile({ detail, onOpen }: { detail: HikeDetail; onOpen: () => void }) {
+  const stats = detail.hike.stats
+  return (
+    <button type="button" className="tile tile-route" onClick={onOpen}>
+      <RouteTrace route={detail.hike.route} />
+      <div className="tile-foot">
+        <strong>Route</strong>
+        <span>
+          {stats?.distance_km != null ? `${stats.distance_km.toFixed(1)} km` : 'No track'}
+          {stats?.ascent_m != null ? `, ${Math.round(stats.ascent_m)} m up` : ''}
+          {stats?.avg_hr != null ? `, ${Math.round(stats.avg_hr)} bpm avg` : ''}
+        </span>
+      </div>
+    </button>
+  )
+}
+
+function PlanTile({ plan, planning, onOpen }: { plan: Plan | null | undefined; planning: boolean; onOpen: () => void }) {
+  if (!plan) {
+    return (
+      <button type="button" className="tile tile-doc" onClick={onOpen}>
+        <span className="doc-kind">Plan</span>
+        <p className="doc-lead">{planning ? 'Drafting your plan…' : 'No plan yet. Open to check the forecast, daylight and kit.'}</p>
+      </button>
+    )
+  }
+  const checks = plan.iterations.at(-1)?.checks ?? []
+  const passed = checks.filter((check) => check.passed).length
+  return (
+    <button type="button" className="tile tile-doc tile-plan" onClick={onOpen}>
+      <span className="doc-kind">Plan</span>
+      <div className="plan-leave">
+        <span>Leave by</span>
+        <strong>{formatLeaveBy(plan.leave_by)}</strong>
+      </div>
+      <ul className="tile-checks" aria-label={`${passed} of ${checks.length} checks passed`}>
+        {checks.map((check) => (
+          <li key={check.name} className={check.passed ? 'ok' : 'bad'} title={check.detail}>{check.name}</li>
+        ))}
+      </ul>
+      <p className="doc-meta">
+        {passed} of {checks.length} checks pass
+        {plan.revisions > 0 ? `. Argon revised it ${plan.revisions} ${plan.revisions === 1 ? 'time' : 'times'}` : ''}
+      </p>
+    </button>
+  )
+}
+
+function RecapTile({ recap, onOpen }: { recap: string | null; onOpen: () => void }) {
+  return (
+    <button type="button" className="tile tile-doc tile-recap" onClick={onOpen}>
+      <span className="doc-kind">Recap</span>
+      {recap
+        ? <p className="doc-body">{plainText(recap).slice(0, 220)}…</p>
+        : <p className="doc-lead">Turn this folder into a short story of the day.</p>}
+    </button>
+  )
+}
+
+function SightingTag({ sighting }: { sighting: Sighting }) {
+  const status = sighting.verification.status
+  if (status === 'not_applicable') return null
+  const name = getSightingName(sighting)
+  return (
+    <span className={`sighting-tag st-${status}`}>
+      <span className="st-dot" aria-hidden="true" />
+      {name.common}
+      <span className="sr-only">, {status}</span>
+    </span>
+  )
+}
+
+function MediaTile({ item, sighting, onOpen }: { item: MediaItem; sighting: Sighting | null; onOpen: () => void }) {
+  if (item.kind === 'note') {
+    return (
+      <button type="button" className="tile tile-note" onClick={onOpen}>
+        <p>{item.text || item.caption}</p>
+        <span className="tile-date">{formatDate(item.taken_at ?? item.created_at)}</span>
+      </button>
+    )
+  }
+  if (item.kind === 'audio') {
+    return (
+      <button type="button" className="tile tile-audio" onClick={onOpen}>
+        <span className="audio-play" aria-hidden="true">▶</span>
+        <Waveform seed={item.id} />
+        <span className="audio-title">{item.caption || item.filename}</span>
+        {sighting && <SightingTag sighting={sighting} />}
+      </button>
+    )
+  }
+  const isVideo = item.kind === 'video'
+  const shape = item.id.charCodeAt(item.id.length - 1) % 3
+  return (
+    <button type="button" className={`tile tile-photo shape-${shape}`} onClick={onOpen} aria-label={item.caption || item.filename}>
+      {isVideo
+        ? <div className="video-poster"><span aria-hidden="true">▶</span>{item.filename}</div>
+        : (
+          <img
+            src={mediaUrl(item.id, 'thumb')}
+            alt=""
+            loading="lazy"
+            onError={(event) => { event.currentTarget.src = '/mock/misty.svg' }}
+          />
+        )}
+      {sighting && <SightingTag sighting={sighting} />}
+      {item.caption && <span className="photo-caption">{item.caption}</span>}
+    </button>
+  )
+}
+
+// ---- sheet ---------------------------------------------------------------
+
+function Sheet({ title, kicker, onClose, children }: { title: string; kicker: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previous
+    }
+  }, [onClose])
+  return (
+    <div className="sheet-layer" onClick={onClose}>
+      <aside className="sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-head">
+          <div>
+            <p className="sheet-kicker">{kicker}</p>
+            <h2>{title}</h2>
+          </div>
+          <button type="button" className="sheet-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="sheet-body">{children}</div>
+      </aside>
+    </div>
+  )
+}
+
+function RouteSheet({ detail }: { detail: HikeDetail }) {
   const { hike, sightings, media } = detail
   const stats = hike.stats
   const metrics: { label: string; value: string | null }[] = [
@@ -223,166 +477,64 @@ function Overview({ detail }: { detail: HikeDetail }) {
     { label: 'Moving speed', value: stats?.avg_moving_speed_kmh == null ? null : `${stats.avg_moving_speed_kmh.toFixed(1)} km/h` },
   ].filter((item) => item.value != null)
   const hasMapData = Boolean(hike.route || sightings.some((sighting) => sighting.location))
-  const notes = hike.plan?.final.notes ?? media
-    .filter((item) => item.kind === 'note' && item.text)
-    .map((item) => item.text!)
-
+  const notes = media.filter((item) => item.kind === 'note' && item.text).map((item) => item.text!)
   return (
     <>
       {metrics.length > 0 ? (
-        <Panel className="stats-grid">
+        <dl className="stat-list">
           {metrics.map((metric) => (
-            <div className="stat-item" key={metric.label}>
-              <div className="stat-value">{metric.value}</div>
-              <div className="stat-label">{metric.label}</div>
-            </div>
+            <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>
           ))}
-        </Panel>
+        </dl>
       ) : (
-        <div className="map-placeholder">No track statistics yet. Add a GPX or FIT track to see distance, time and elevation.</div>
+        <p className="muted">No track statistics yet. Add a GPX or FIT file to see distance, time and elevation.</p>
       )}
-      <section className="section">
-        <div className="section-header"><h2>Route and sightings</h2></div>
-        {hasMapData
-          ? <MapView route={hike.route} sightings={sightings} />
-          : <div className="map-placeholder"><div><strong>No track yet</strong><br />Add a route to place this hike on the map.</div></div>}
-      </section>
+      {hasMapData
+        ? <MapView route={hike.route} sightings={sightings} />
+        : <div className="map-placeholder">Add a route to place this hike on the map.</div>}
       {notes.length > 0 && (
         <section className="section">
-          <h2>Trail notes</h2>
-          <Panel className="panel-pad">
-            <ul className="why-list">{notes.map((note) => <li key={note}>{note}</li>)}</ul>
-          </Panel>
+          <h3>Trail notes</h3>
+          <ul className="why-list">{notes.map((note) => <li key={note}>{note}</li>)}</ul>
         </section>
       )}
     </>
   )
 }
 
-function MediaSection({
-  detail,
-  onUpload,
-  uploading,
-  uploadProgress,
-  uploadError,
-  uploadResult,
-}: {
-  detail: HikeDetail
-  onUpload: (event: ChangeEvent<HTMLInputElement>) => void
-  uploading: boolean
-  uploadProgress: number
-  uploadError: string
-  uploadResult: UploadMediaResponse | null
-}) {
-  const photos = detail.media.filter((item) => item.kind === 'photo')
-  const audio = detail.media.filter((item) => item.kind === 'audio')
-  const notes = detail.media.filter((item) => item.kind === 'note')
+function MediaSheet({ item, sighting }: { item: MediaItem; sighting: Sighting | null }) {
   return (
     <>
-      <div className="section-header">
-        <div><h2>Memories from the trail</h2><p className="muted small">Photos, recordings and notes, together.</p></div>
-        <label className="button button-small">
-          {uploading ? 'Uploading…' : '+ Add media'}
-          <input
-            accept="image/*,audio/*"
-            capture="environment"
-            hidden
-            onChange={onUpload}
-            type="file"
-            disabled={uploading}
-          />
-        </label>
-      </div>
-      {uploading && (
-        <Panel className="panel-pad" style={{ marginBottom: 16 }}>
-          <strong className="small">Uploading your file… {uploadProgress}%</strong>
-          <div className="upload-progress"><div style={{ width: `${uploadProgress}%` }} /></div>
-        </Panel>
+      {item.kind === 'photo' && (
+        <img className="sheet-photo" src={mediaUrl(item.id)} alt={item.caption ?? ''} onError={(event) => { event.currentTarget.src = '/mock/misty.svg' }} />
       )}
-      {uploadError && <div style={{ marginBottom: 16 }}><ErrorBox message={uploadError} /></div>}
-      {uploadResult && <UploadResult result={uploadResult} />}
-      {photos.length > 0 && (
-        <div className="media-grid">
-          {photos.map((item) => <PhotoCard item={item} key={item.id} />)}
+      {item.kind === 'video' && (
+        <video className="sheet-photo" controls preload="metadata" src={mediaUrl(item.id, 'original')} />
+      )}
+      {item.kind === 'audio' && (
+        <div className="sheet-audio">
+          <Waveform seed={item.id} bars={60} />
+          <audio controls preload="none" src={mediaUrl(item.id, 'original')} />
         </div>
       )}
-      {audio.length > 0 && (
-        <section className="section">
-          <h2>Audio</h2>
-          <div className="media-grid">
-            {audio.map((item) => (
-              <Panel className="audio-card" key={item.id}>
-                <h3>{item.caption || item.filename}</h3>
-                <audio controls preload="none" src={item.display_file_id ? mediaUrl(item.id) : undefined} />
-                {!item.display_file_id && <p className="muted small">Audio preview isn’t available in this demo.</p>}
-                <p className="muted small">{formatDate(item.taken_at ?? item.created_at)}</p>
-              </Panel>
-            ))}
-          </div>
-        </section>
+      {item.kind === 'note'
+        ? <p className="sheet-note">{item.text || item.caption}</p>
+        : item.caption && <p className="sheet-caption">{item.caption}</p>}
+      {item.tags.length > 0 && (
+        <ul className="tag-list">{item.tags.map((tag) => <li key={tag}>{tag}</li>)}</ul>
       )}
-      {notes.length > 0 && (
-        <section className="section">
-          <h2>Notes</h2>
-          <div className="media-grid">
-            {notes.map((item) => <Panel className="note-card" key={item.id}>{item.text || item.caption}</Panel>)}
-          </div>
+      <p className="muted small">
+        {item.location_source === 'exif' && 'Located from the photo. '}
+        {item.location_source === 'track' && 'Placed on the track by its timestamp. '}
+        {!item.location && item.kind !== 'note' && 'No location recorded. '}
+      </p>
+      {sighting && sighting.verification.status !== 'not_applicable' && (
+        <section className="sheet-sighting">
+          <h3 className="sheet-section-title">Identification</h3>
+          <SightingDetails sighting={sighting} />
         </section>
-      )}
-      {photos.length === 0 && audio.length === 0 && notes.length === 0 && (
-        <div className="empty-state"><h2>No media yet</h2><p className="muted">Add a photo or recording from the trail.</p></div>
       )}
     </>
-  )
-}
-
-function PhotoCard({ item }: { item: MediaItem }) {
-  return (
-    <article className="media-card">
-      <img className="media-image" src={mediaUrl(item.id, 'thumb')} alt="" onError={(event) => { event.currentTarget.src = '/mock/misty.svg' }} />
-      <div className="media-caption">
-        {item.caption || item.filename}
-        <p>{item.taken_at ? formatDate(item.taken_at) : 'Date and location not recorded'}</p>
-      </div>
-    </article>
-  )
-}
-
-function UploadResult({ result }: { result: UploadMediaResponse }) {
-  const media = result.media
-  const sighting = result.sighting
-  return (
-    <Panel className="panel-pad" style={{ marginBottom: 18 }}>
-      <span className="eyebrow">Just added</span>
-      <div className="media-grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) 1.3fr', alignItems: 'start' }}>
-        {media.kind === 'photo'
-          ? <img className="media-image" style={{ borderRadius: 14 }} src={mediaUrl(media.id)} alt="" />
-          : <div className="map-placeholder">Audio note added</div>}
-        <div>
-          <p><strong>{media.caption || media.filename}</strong></p>
-          {sighting && <SightingDetails sighting={sighting} />}
-        </div>
-      </div>
-    </Panel>
-  )
-}
-
-function SightingsSection({ detail }: { detail: HikeDetail }) {
-  if (!detail.sightings.length) {
-    return <div className="empty-state"><h2>No wildlife notes yet</h2><p className="muted">Upload a photo to start a sighting record.</p></div>
-  }
-  return (
-    <div className="sighting-grid">
-      {detail.sightings.map((sighting) => {
-        const media = detail.media.find((item) => item.id === sighting.media_id)
-        return (
-          <Panel className="sighting-card" key={sighting.id}>
-            {media && <img className="sighting-photo" src={mediaUrl(media.id)} alt="" onError={(event) => { event.currentTarget.src = '/mock/misty.svg' }} />}
-            <div className="sighting-content"><SightingDetails sighting={sighting} /></div>
-          </Panel>
-        )
-      })}
-    </div>
   )
 }
 
