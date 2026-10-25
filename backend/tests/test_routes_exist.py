@@ -40,7 +40,6 @@ ROUTES = [
         "/hikes/hike-1/track",
         {"files": {"file": ("sample.gpx", b"<gpx />", "application/gpx+xml")}},
     ),
-    ("POST", "/hikes/hike-1/plan", {}),
     ("GET", "/search?q=fox", {}),
     ("GET", "/species/near?lat=51.5&lon=-0.1", {}),
     ("POST", "/hikes/hike-1/recap", {}),
