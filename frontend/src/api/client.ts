@@ -8,6 +8,7 @@ import type {
   HikeStats,
   MediaItem,
   Plan,
+  PlanProgress,
   RecapResponse,
   SearchResult,
   Sighting,
@@ -233,15 +234,96 @@ export async function uploadTrack(hikeId: string, file: File): Promise<TrackUplo
   })
 }
 
+type MockPlanRun = {
+  run_id: string
+  events: PlanProgress[]
+}
+
+const mockProgress = new Map<string, MockPlanRun>()
+
+function mockPlanEvents(plan: Plan): PlanProgress[] {
+  const events: PlanProgress[] = [
+    { stage: 'forecast', message: 'Fetching the forecast', revision: 0, failed: [] },
+    { stage: 'hazards', message: 'Researching closures and hazards', revision: 0, failed: [] },
+    { stage: 'draft', message: 'Drafting the plan', revision: 0, failed: [] },
+  ]
+
+  plan.iterations.forEach((iteration, index) => {
+    const failed = iteration.checks
+      .filter((check) => check.passed === false)
+      .map((check) => check.name)
+    const passedCount = iteration.checks.length - failed.length
+    events.push({
+      stage: 'checks',
+      message: `Checks: ${passedCount} passed, ${failed.length} failed`,
+      revision: index,
+      failed,
+    })
+    if (index < plan.iterations.length - 1) {
+      const revision = index + 1
+      events.push({
+        stage: 'revise',
+        message: `Revising (${revision}/2): ${failed.join(', ')}`,
+        revision,
+        failed,
+      })
+    }
+  })
+
+  events.push({
+    stage: 'done',
+    message: 'Plan ready',
+    revision: plan.revisions,
+    failed: [],
+  })
+  return events
+}
+
+async function playMockProgress(
+  hikeId: string,
+  runId: string,
+  plan: Plan,
+): Promise<void> {
+  const started = Date.now()
+  const events = mockPlanEvents(plan)
+  for (const [index, step] of events.entries()) {
+    const run = mockProgress.get(hikeId)
+    if (!run || run.run_id !== runId) return
+    run.events.push({
+      ...step,
+      run_id: runId,
+      elapsed_ms: Date.now() - started,
+      updated_at: new Date().toISOString(),
+    })
+    if (index < events.length - 1) await sleep(900)
+  }
+}
+
+/** Latest planner stage and event history, or null when no progress is available. */
+export async function getPlanProgress(hikeId: string): Promise<PlanProgress | null> {
+  if (USE_MOCKS) {
+    const run = mockProgress.get(hikeId)
+    const latest = run?.events.at(-1)
+    return latest && run ? { ...latest, events: run.events } : null
+  }
+  try {
+    return await request<PlanProgress>(`/hikes/${encodeURIComponent(hikeId)}/plan/progress`)
+  } catch {
+    return null
+  }
+}
+
 export async function planHike(hikeId: string): Promise<Plan> {
   if (USE_MOCKS) {
-    await sleep(600)
     const hike = mockState.hikes.find((item) => item.id === hikeId)
     if (!hike) throw new Error('Hike not found.')
     const template = mockState.hikes.find((item) => item.id === 'hike-kinder-planned')?.plan
     if (!template) throw new Error('The mock plan is not available.')
-    hike.plan = template
-    return hike.plan
+    const runId = window.crypto.randomUUID()
+    mockProgress.set(hikeId, { run_id: runId, events: [] })
+    await playMockProgress(hikeId, runId, template)
+    if (mockProgress.get(hikeId)?.run_id === runId) hike.plan = template
+    return template
   }
   return request<Plan>(`/hikes/${encodeURIComponent(hikeId)}/plan`, { method: 'POST' })
 }
