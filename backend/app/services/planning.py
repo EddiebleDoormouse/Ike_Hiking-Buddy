@@ -260,10 +260,37 @@ def check_forecast_available(forecast: DayForecast) -> Check:
     """Check 7: Open-Meteo had a forecast for the hike date."""
     day_text = forecast.day.isoformat()
     if forecast.in_forecast_range:
-        detail = f"An hourly forecast with {len(forecast.hourly)} hours is available for {day_text}."
+        # Count only the hike day: merged neighbour-day hours are not "for" this date.
+        day_hours = sum(1 for h in forecast.hourly if h.time.date() == forecast.day)
+        detail = f"An hourly forecast with {day_hours} hours is available for {day_text}."
         return Check(name="Forecast available", passed=True, detail=detail)
     detail = f"Forecast not available yet for {day_text}; re-check within 7 days of the hike."
     return Check(name="Forecast available", passed=False, detail=detail)
+
+
+def checked_duration_min(
+    draft: PlanDraft, distance_km: float, ascent_m: float, pace_factor: float = 1.0
+) -> int:
+    """The duration the checks use: the longer of the draft's and Naismith's."""
+    return max(draft.est_duration_min, naismith_minutes(distance_km, ascent_m, pace_factor))
+
+
+def hike_window_utc(
+    draft: PlanDraft,
+    day: date,
+    distance_km: float,
+    ascent_m: float,
+    pace_factor: float = 1.0,
+    tz: str = "Europe/London",
+) -> tuple[datetime, datetime]:
+    """Return the (start, end) in UTC that run_checks will check the weather for.
+
+    Pass these to weather.get_hike_forecast before run_checks, so a hike that
+    crosses UTC midnight gets both days of forecast.
+    """
+    start_utc = local_start_to_utc(day, draft.start_time_local, tz)
+    duration = checked_duration_min(draft, distance_km, ascent_m, pace_factor)
+    return start_utc, start_utc + timedelta(minutes=duration)
 
 
 def run_checks(
@@ -282,7 +309,7 @@ def run_checks(
     has no forecast, because an unchecked hour is not a safe hour.
     """
     naismith = naismith_minutes(distance_km, ascent_m, pace_factor)
-    duration = max(draft.est_duration_min, naismith)
+    duration = checked_duration_min(draft, distance_km, ascent_m, pace_factor)
     start_utc = local_start_to_utc(forecast.day, draft.start_time_local, tz)
     hours = window_hours(forecast, start_utc, duration)
     missing = missing_window_hours(forecast, start_utc, duration)
