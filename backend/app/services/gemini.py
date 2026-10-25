@@ -3,12 +3,14 @@
 import base64
 import logging
 import time
-from typing import Any, Literal
+from typing import Any
 
 from google import genai
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
-MEDIA_MODEL = "gemini-3.8-flash"  # TODO(P0): replace with settings.MEDIA_MODEL once app/config.py exists
+from app.config import settings
+from app.models import Candidate, MediaAnalysis
+
 MEDIA_THINKING_LEVEL = "low"
 MAX_CANDIDATES = 3
 FUNGUS_SAFETY_NOTE = "Never eat anything based on this ID"
@@ -30,39 +32,6 @@ Never present an identification as certain."""
 logger = logging.getLogger(__name__)
 _client: genai.Client | None = None
 
-Group = Literal[
-    "plant",
-    "fungus",
-    "bird",
-    "mammal",
-    "insect",
-    "reptile",
-    "amphibian",
-    "fish",
-    "lichen",
-    "other",
-]
-
-
-class Candidate(BaseModel):
-    """One possible identification for a wild organism."""
-
-    common_name: str = Field(description="Common name in UK English.")
-    scientific_name: str = Field(description="Scientific name or genus.")
-    confidence: float = Field(ge=0, le=1, description="Confidence from 0 to 1.")
-    group: Group = Field(description="Organism group.")
-
-
-class MediaAnalysis(BaseModel):
-    """Structured caption and possible identification for uploaded media."""
-
-    caption: str
-    tags: list[str]
-    is_organism: bool
-    candidates: list[Candidate] = []
-    safety_note: str | None = None
-
-
 class GeminiError(Exception):
     """Raised when a Gemini request or structured response is invalid."""
 
@@ -71,7 +40,10 @@ def get_client() -> genai.Client:
     """Return the cached Gemini client, creating it on first use."""
     global _client
     if _client is None:
-        _client = genai.Client()
+        if settings.GEMINI_API_KEY:
+            _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        else:
+            _client = genai.Client()
     return _client
 
 
@@ -165,7 +137,7 @@ def analyze_media(
         },
         media_part,
     ]
-    model_name = model or MEDIA_MODEL
+    model_name = model or settings.MEDIA_MODEL
 
     for attempt in range(1, 3):
         start_time = time.perf_counter()
