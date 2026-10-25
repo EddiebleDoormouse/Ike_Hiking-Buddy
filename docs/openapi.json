@@ -1,0 +1,1442 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hiking Buddy API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/hikes": {
+      "get": {
+        "summary": "List Hikes",
+        "description": "List hike cards.",
+        "operationId": "list_hikes_hikes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HikeCard"
+                  },
+                  "type": "array",
+                  "title": "Response List Hikes Hikes Get"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Hike",
+        "description": "Create a hike.",
+        "operationId": "create_hike_hikes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HikeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Hike"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hikes/{hike_id}": {
+      "get": {
+        "summary": "Get Hike",
+        "description": "Return a hike and its associated media and sightings.",
+        "operationId": "get_hike_hikes__hike_id__get",
+        "parameters": [
+          {
+            "name": "hike_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HikeDetail"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hikes/{hike_id}/media": {
+      "post": {
+        "summary": "Upload Media",
+        "description": "Upload media to a hike.",
+        "operationId": "upload_media_hikes__hike_id__media_post",
+        "parameters": [
+          {
+            "name": "hike_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_media_hikes__hike_id__media_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadMediaResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media/{media_id}/file": {
+      "get": {
+        "summary": "Get Media File",
+        "description": "Stream a requested media-file variant.",
+        "operationId": "get_media_file_media__media_id__file_get",
+        "parameters": [
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Media Id"
+            }
+          },
+          {
+            "name": "variant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "original",
+                "display",
+                "thumb"
+              ],
+              "type": "string",
+              "default": "display",
+              "title": "Variant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hikes/{hike_id}/track": {
+      "post": {
+        "summary": "Upload Track",
+        "description": "Upload and parse a hike track.",
+        "operationId": "upload_track_hikes__hike_id__track_post",
+        "parameters": [
+          {
+            "name": "hike_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_track_hikes__hike_id__track_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackUploadResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hikes/{hike_id}/plan": {
+      "post": {
+        "summary": "Plan Hike",
+        "description": "Draft a plan for a hike.",
+        "operationId": "plan_hike_hikes__hike_id__plan_post",
+        "parameters": [
+          {
+            "name": "hike_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plan Hike Hikes  Hike Id  Plan Post"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "get": {
+        "summary": "Search",
+        "description": "Search media and sightings.",
+        "operationId": "search_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "hike_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResult"
+                  },
+                  "title": "Response Search Search Get"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/species/near": {
+      "get": {
+        "summary": "Species Near",
+        "description": "List species recorded near a location.",
+        "operationId": "species_near_species_near_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Lon"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 10,
+              "title": "Radius Km"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpeciesNear"
+                  },
+                  "title": "Response Species Near Species Near Get"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hikes/{hike_id}/recap": {
+      "post": {
+        "summary": "Create Recap",
+        "description": "Create a recap for a hike.",
+        "operationId": "create_recap_hikes__hike_id__recap_post",
+        "parameters": [
+          {
+            "name": "hike_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hike Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecapResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not implemented yet"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Return application and MongoDB health.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_upload_media_hikes__hike_id__media_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_media_hikes__hike_id__media_post"
+      },
+      "Body_upload_track_hikes__hike_id__track_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_track_hikes__hike_id__track_post"
+      },
+      "Candidate": {
+        "properties": {
+          "common_name": {
+            "type": "string",
+            "title": "Common Name"
+          },
+          "scientific_name": {
+            "type": "string",
+            "title": "Scientific Name"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "plant",
+              "fungus",
+              "bird",
+              "mammal",
+              "insect",
+              "reptile_amphibian",
+              "other"
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "common_name",
+          "scientific_name",
+          "confidence",
+          "group"
+        ],
+        "title": "Candidate"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Health": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "mongo": {
+            "type": "boolean",
+            "title": "Mongo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "mongo"
+        ],
+        "title": "Health"
+      },
+      "Hike": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "trail_name": {
+            "type": "string",
+            "title": "Trail Name"
+          },
+          "hiker": {
+            "type": "string",
+            "title": "Hiker"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "completed"
+            ],
+            "title": "Status"
+          },
+          "based_on_hike_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Based On Hike Id"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "stats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stats"
+          },
+          "pace_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pace Factor"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
+          },
+          "recap_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recap Md"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "trail_name",
+          "hiker",
+          "date",
+          "status",
+          "id",
+          "created_at"
+        ],
+        "title": "Hike"
+      },
+      "HikeCard": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "trail_name": {
+            "type": "string",
+            "title": "Trail Name"
+          },
+          "hiker": {
+            "type": "string",
+            "title": "Hiker"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "completed"
+            ],
+            "title": "Status"
+          },
+          "cover_media_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Media Id"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "ascent_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ascent M"
+          },
+          "species_count": {
+            "type": "integer",
+            "title": "Species Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "trail_name",
+          "hiker",
+          "date",
+          "status"
+        ],
+        "title": "HikeCard"
+      },
+      "HikeCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "trail_name": {
+            "type": "string",
+            "title": "Trail Name"
+          },
+          "hiker": {
+            "type": "string",
+            "title": "Hiker"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "completed"
+            ],
+            "title": "Status"
+          },
+          "based_on_hike_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Based On Hike Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "trail_name",
+          "hiker",
+          "date",
+          "status"
+        ],
+        "title": "HikeCreate"
+      },
+      "HikeDetail": {
+        "properties": {
+          "hike": {
+            "$ref": "#/components/schemas/Hike"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/MediaItem"
+            },
+            "type": "array",
+            "title": "Media"
+          },
+          "sightings": {
+            "items": {
+              "$ref": "#/components/schemas/Sighting"
+            },
+            "type": "array",
+            "title": "Sightings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hike"
+        ],
+        "title": "HikeDetail"
+      },
+      "MediaItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "hike_id": {
+            "type": "string",
+            "title": "Hike Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "photo",
+              "audio",
+              "video",
+              "note"
+            ],
+            "title": "Kind"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "mime": {
+            "type": "string",
+            "title": "Mime"
+          },
+          "original_file_id": {
+            "type": "string",
+            "title": "Original File Id"
+          },
+          "display_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display File Id"
+          },
+          "thumb_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumb File Id"
+          },
+          "taken_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taken At"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "location_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "exif",
+                  "track"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Source"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "hike_id",
+          "kind",
+          "filename",
+          "mime",
+          "original_file_id",
+          "created_at"
+        ],
+        "title": "MediaItem"
+      },
+      "RecapResponse": {
+        "properties": {
+          "recap_md": {
+            "type": "string",
+            "title": "Recap Md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recap_md"
+        ],
+        "title": "RecapResponse"
+      },
+      "SearchResult": {
+        "properties": {
+          "media": {
+            "$ref": "#/components/schemas/MediaItem"
+          },
+          "hike_title": {
+            "type": "string",
+            "title": "Hike Title"
+          },
+          "sighting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sighting"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "media",
+          "hike_title",
+          "score"
+        ],
+        "title": "SearchResult"
+      },
+      "Sighting": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "hike_id": {
+            "type": "string",
+            "title": "Hike Id"
+          },
+          "media_id": {
+            "type": "string",
+            "title": "Media Id"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/Verification"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seen At"
+          },
+          "safety_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "hike_id",
+          "media_id",
+          "verification"
+        ],
+        "title": "Sighting"
+      },
+      "SpecialistResult": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "plantnet",
+              "mushroom_id"
+            ],
+            "title": "Source"
+          },
+          "top_name": {
+            "type": "string",
+            "title": "Top Name"
+          },
+          "top_common_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Common Name"
+          },
+          "top_score": {
+            "type": "number",
+            "title": "Top Score"
+          },
+          "alternatives": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Alternatives"
+          },
+          "gbif_key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gbif Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "top_name",
+          "top_score"
+        ],
+        "title": "SpecialistResult"
+      },
+      "SpeciesNear": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scientific_name": {
+            "type": "string",
+            "title": "Scientific Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "scientific_name",
+          "count"
+        ],
+        "title": "SpeciesNear"
+      },
+      "TrackUploadResponse": {
+        "properties": {
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats"
+          },
+          "route": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Route"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stats",
+          "route"
+        ],
+        "title": "TrackUploadResponse"
+      },
+      "UploadMediaResponse": {
+        "properties": {
+          "media": {
+            "$ref": "#/components/schemas/MediaItem"
+          },
+          "sighting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sighting"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "media"
+        ],
+        "title": "UploadMediaResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Verification": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "plausible",
+              "unsure",
+              "not_applicable"
+            ],
+            "title": "Status"
+          },
+          "chosen": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Candidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gbif_nearby_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gbif Nearby Count"
+          },
+          "gbif_key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gbif Key"
+          },
+          "specialist": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpecialistResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "specialist_agrees": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "species",
+                  "genus",
+                  "no"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specialist Agrees"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "Verification"
+      }
+    }
+  }
+}
