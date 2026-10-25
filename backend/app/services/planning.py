@@ -91,6 +91,24 @@ def window_hours(forecast: DayForecast, start_utc: datetime, duration_min: int) 
     return [h for h in forecast.hourly if h.time < end_utc and h.time + one_hour > start_utc]
 
 
+def missing_window_hours(forecast: DayForecast, start_utc: datetime, duration_min: int) -> list[datetime]:
+    """Return the UTC hour starts the hike needs that the forecast doesn't have.
+
+    A gap appears when the hike crosses UTC midnight (the forecast covers one
+    UTC day) or when Open-Meteo sent a null value and that hour was dropped.
+    Weather checks must treat these hours as unknown, not as safe.
+    """
+    end_utc = start_utc + timedelta(minutes=duration_min)
+    available = {h.time for h in forecast.hourly}
+    missing: list[datetime] = []
+    hour = start_utc.replace(minute=0, second=0, microsecond=0)
+    while hour < end_utc:
+        if hour not in available:
+            missing.append(hour)
+        hour += timedelta(hours=1)
+    return missing
+
+
 def local_start_to_utc(day: date, start_time_local: time, tz: str = "Europe/London") -> datetime:
     """Combine a date and a local wall-clock time into a UTC datetime.
 
@@ -175,6 +193,24 @@ def check_rain(hours: list[HourlyWeather]) -> Check:
     return Check(name="Rain", passed=passed, detail=detail)
 
 
+def fail_for_gaps(check: Check, what: str, missing: list[datetime], total: int, has_data: bool) -> Check:
+    """Fail a weather check because some hours of the hike have no forecast.
+
+    The reading from the hours we do have (e.g. a 65 km/h gust) stays in the
+    detail, so a known hazard is never hidden behind the gap message.
+    """
+    first_gap = missing[0].strftime("%H:%M UTC on %Y-%m-%d")
+    gap_text = (
+        f"the forecast is missing {len(missing)} of {total} hours of the hike "
+        f"(first gap {first_gap}), so {what} could not be fully checked."
+    )
+    if has_data:
+        detail = f"{check.detail.removesuffix('.')}, but {gap_text}"
+    else:
+        detail = gap_text[0].upper() + gap_text[1:]
+    return Check(name=check.name, passed=False, detail=detail)
+
+
 def kit_has_cold_items(kit: list[KitItem]) -> bool:
     """True if any kit item mentions gloves, a hat, insulated or thermal layers."""
     return any(COLD_KIT_PATTERN.search(k.item) for k in kit)
@@ -224,10 +260,37 @@ def check_forecast_available(forecast: DayForecast) -> Check:
     """Check 7: Open-Meteo had a forecast for the hike date."""
     day_text = forecast.day.isoformat()
     if forecast.in_forecast_range:
-        detail = f"An hourly forecast with {len(forecast.hourly)} hours is available for {day_text}."
+        # Count only the hike day: merged neighbour-day hours are not "for" this date.
+        day_hours = sum(1 for h in forecast.hourly if h.time.date() == forecast.day)
+        detail = f"An hourly forecast with {day_hours} hours is available for {day_text}."
         return Check(name="Forecast available", passed=True, detail=detail)
     detail = f"Forecast not available yet for {day_text}; re-check within 7 days of the hike."
     return Check(name="Forecast available", passed=False, detail=detail)
+
+
+def checked_duration_min(
+    draft: PlanDraft, distance_km: float, ascent_m: float, pace_factor: float = 1.0
+) -> int:
+    """The duration the checks use: the longer of the draft's and Naismith's."""
+    return max(draft.est_duration_min, naismith_minutes(distance_km, ascent_m, pace_factor))
+
+
+def hike_window_utc(
+    draft: PlanDraft,
+    day: date,
+    distance_km: float,
+    ascent_m: float,
+    pace_factor: float = 1.0,
+    tz: str = "Europe/London",
+) -> tuple[datetime, datetime]:
+    """Return the (start, end) in UTC that run_checks will check the weather for.
+
+    Pass these to weather.get_hike_forecast before run_checks, so a hike that
+    crosses UTC midnight gets both days of forecast.
+    """
+    start_utc = local_start_to_utc(day, draft.start_time_local, tz)
+    duration = checked_duration_min(draft, distance_km, ascent_m, pace_factor)
+    return start_utc, start_utc + timedelta(minutes=duration)
 
 
 def run_checks(
@@ -242,18 +305,31 @@ def run_checks(
 
     The finish-before-dark check and the weather window use the longer of
     the draft's estimate and Naismith's rule, so an optimistic draft can't
-    hide a late finish.
+    hide a late finish. Wind, Rain and Cold fail if any hour of the hike
+    has no forecast, because an unchecked hour is not a safe hour.
     """
     naismith = naismith_minutes(distance_km, ascent_m, pace_factor)
-    duration = max(draft.est_duration_min, naismith)
+    duration = checked_duration_min(draft, distance_km, ascent_m, pace_factor)
     start_utc = local_start_to_utc(forecast.day, draft.start_time_local, tz)
     hours = window_hours(forecast, start_utc, duration)
+    missing = missing_window_hours(forecast, start_utc, duration)
+    total = len(hours) + len(missing)
+    wind = check_wind(hours)
+    rain = check_rain(hours)
+    cold = check_cold(hours, draft.kit)
+    if missing:
+        has_data = bool(hours)
+        wind = fail_for_gaps(wind, "gusts", missing, total, has_data)
+        rain = fail_for_gaps(rain, "rain", missing, total, has_data)
+        # Packing cold-weather kit makes the Cold check pass even with gaps.
+        if not kit_has_cold_items(draft.kit):
+            cold = fail_for_gaps(cold, "temperatures", missing, total, has_data)
     return [
         check_finish_before_dark(start_utc, duration, forecast.sunset, tz),
         check_duration_realistic(draft.est_duration_min, naismith),
-        check_wind(hours),
-        check_rain(hours),
-        check_cold(hours, draft.kit),
+        wind,
+        rain,
+        cold,
         check_sources_cited(draft.hazards),
         check_forecast_available(forecast),
     ]
