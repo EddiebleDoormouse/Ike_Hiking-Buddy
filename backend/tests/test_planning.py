@@ -408,3 +408,11 @@ def test_merged_neighbour_day_hazard_is_caught():
     forecast = merge_forecasts(make_forecast(day=day), [night_before])
     wind = check_named(run(make_draft(start=time(0, 30)), forecast), "Wind")
     assert not wind.passed and "70 km/h" in wind.detail
+
+
+def test_forecast_available_counts_only_hike_day_after_merge():
+    day = date(2026, 10, 24)
+    forecast = merge_forecasts(make_forecast(day=day), [make_forecast(day=date(2026, 10, 23))])
+    check = check_named(run(make_draft(start=time(0, 30)), forecast), "Forecast available")
+    assert check.passed
+    assert check.detail == "An hourly forecast with 24 hours is available for 2026-10-24."

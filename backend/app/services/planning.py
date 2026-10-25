@@ -260,7 +260,9 @@ def check_forecast_available(forecast: DayForecast) -> Check:
     """Check 7: Open-Meteo had a forecast for the hike date."""
     day_text = forecast.day.isoformat()
     if forecast.in_forecast_range:
-        detail = f"An hourly forecast with {len(forecast.hourly)} hours is available for {day_text}."
+        # Count only the hike day: merged neighbour-day hours are not "for" this date.
+        day_hours = sum(1 for h in forecast.hourly if h.time.date() == forecast.day)
+        detail = f"An hourly forecast with {day_hours} hours is available for {day_text}."
         return Check(name="Forecast available", passed=True, detail=detail)
     detail = f"Forecast not available yet for {day_text}; re-check within 7 days of the hike."
     return Check(name="Forecast available", passed=False, detail=detail)
