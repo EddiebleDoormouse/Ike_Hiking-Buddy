@@ -269,6 +269,7 @@ def test_photo_upload_creates_display_thumb_and_unsure_sighting(
     response = client.post(
         f"/hikes/{hike_id}/media",
         files={"file": ("ivy.jpg", original, "image/jpeg")},
+        data={"text": "by the stile"},
     )
 
     assert response.status_code == 201
@@ -277,6 +278,7 @@ def test_photo_upload_creates_display_thumb_and_unsure_sighting(
     assert media["kind"] == "photo"
     assert media["caption"] == "A small bird in a green hedgerow."
     assert media["tags"] == ["bird", "hedgerow"]
+    assert media["text"] == "by the stile"
     assert len(fake_bucket.files) == 3
     sighting = payload["sighting"]
     assert sighting["verification"]["status"] == "unsure"
@@ -315,6 +317,7 @@ def test_heic_upload_with_octet_stream_is_inferred_as_photo(
 
     assert response.status_code == 201
     assert response.json()["media"]["kind"] == "photo"
+    assert response.json()["media"]["mime"] == "image/heic"
     assert len(fake_bucket.files) == 3
     display_id = ObjectId(response.json()["media"]["display_file_id"])
     with Image.open(BytesIO(fake_bucket.files[display_id]["data"])) as image:

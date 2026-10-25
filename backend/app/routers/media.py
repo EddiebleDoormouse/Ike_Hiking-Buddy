@@ -143,7 +143,7 @@ def _upload_file(
     response_model=UploadMediaResponse,
     status_code=201,
 )
-async def upload_media(
+def upload_media(
     hike_id: str,
     file: UploadFile | None = File(None),
     kind: MediaKind | None = Form(None),
@@ -161,12 +161,15 @@ async def upload_media(
         raise HTTPException(status_code=400, detail="A file or note text is required")
 
     if file is not None:
-        data = await file.read()
+        data = file.file.read()
         if not data:
             raise HTTPException(status_code=400, detail="File is empty")
         filename = file.filename or "upload"
-        mime = file.content_type or mimetypes.guess_type(filename)[0]
-        mime = mime or "application/octet-stream"
+        mime = file.content_type or "application/octet-stream"
+        if mime.lower() == "application/octet-stream":
+            guessed_mime = mimetypes.guess_type(filename)[0]
+            if guessed_mime:
+                mime = guessed_mime
         selected_kind = kind or _infer_kind(filename, mime)
         if selected_kind is None:
             raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -265,7 +268,7 @@ async def upload_media(
         "location_source": None,
         "caption": caption,
         "tags": tags,
-        "text": note_text,
+        "text": note_text if selected_kind == "note" else text,
         "is_organism": analysis.is_organism if analysis is not None else False,
         "created_at": now,
     }
