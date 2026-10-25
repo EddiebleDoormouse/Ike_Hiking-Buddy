@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getHealth, listHikes, mediaUrl } from '../api/client'
 import type { Health, HikeCard } from '../api/types'
+import { Masonry, type BoardEntry } from '../components/Board'
 import { formatDate } from '../components/format'
-import { ErrorBox, SkeletonCards, StatusBadge } from '../components/Shared'
+import { ErrorBox, SkeletonCards } from '../components/Shared'
+
+type Filter = 'all' | 'completed' | 'planned'
 
 function HikesGallery() {
   const navigate = useNavigate()
@@ -12,6 +15,7 @@ function HikesGallery() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
 
   const load = useCallback(async () => {
     try {
@@ -25,9 +29,7 @@ function HikesGallery() {
     }
   }, [])
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  useEffect(() => { void load() }, [load])
 
   function retryLoad() {
     setLoading(true)
@@ -37,83 +39,97 @@ function HikesGallery() {
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    navigate(`/search?q=${encodeURIComponent(query.trim())}`)
+    if (query.trim()) navigate(`/search?q=${encodeURIComponent(query.trim())}`)
   }
+
+  const shown = hikes.filter((hike) => filter === 'all' || hike.status === filter)
+  const counts = {
+    all: hikes.length,
+    completed: hikes.filter((hike) => hike.status === 'completed').length,
+    planned: hikes.filter((hike) => hike.status === 'planned').length,
+  }
+
+  const entries: BoardEntry[] = [
+    {
+      key: 'new',
+      weight: 0.55,
+      node: (
+        <Link className="tile tile-new" to="/new">
+          <span className="tile-new-plus" aria-hidden="true">+</span>
+          <span>Plan a new hike</span>
+          <span className="tile-new-hint">Forecast, daylight and kit, checked</span>
+        </Link>
+      ),
+    },
+    ...shown.map((hike, index): BoardEntry => ({
+      key: hike.id,
+      weight: index % 3 === 1 ? 1.15 : 0.95,
+      node: (
+        <Link className="hike-tile" to={`/hikes/${hike.id}`}>
+          <div className={`hike-tile-cover ${index % 3 === 1 ? 'tall' : ''}`}>
+            <img
+              src={hike.cover_media_id ? mediaUrl(hike.cover_media_id, 'thumb') : '/mock/chilterns.svg'}
+              alt=""
+              loading="lazy"
+              onError={(event) => { event.currentTarget.src = '/mock/chilterns.svg' }}
+            />
+            {hike.status === 'planned' && <span className="cover-flag">Planned</span>}
+          </div>
+          <div className="hike-tile-text">
+            <h2>{hike.title}</h2>
+            <p>{hike.trail_name}</p>
+            <p className="hike-tile-facts">
+              <span>{formatDate(hike.date)}</span>
+              {hike.distance_km != null && <span>{hike.distance_km.toFixed(1)} km</span>}
+              {hike.ascent_m != null && <span>{Math.round(hike.ascent_m)} m up</span>}
+              {(hike.species_count ?? 0) > 0 && <span>{hike.species_count} species</span>}
+            </p>
+          </div>
+        </Link>
+      ),
+    })),
+  ]
 
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">Your trail journal</span>
-          <h1>Every hike, in one place.</h1>
-          <p className="subheading">Plans, photographs and little things you noticed along the way.</p>
-        </div>
-        <Link className="button" to="/new">+ Plan a hike</Link>
-      </div>
+      <form className="hero-search" onSubmit={submitSearch} role="search">
+        <label htmlFor="hero-q" className="sr-only">Search your hikes</label>
+        <input
+          id="hero-q"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search your trails…"
+          value={query}
+          autoComplete="off"
+        />
+        <p className="hero-search-hint">A fox, red mushrooms, that misty ridge. Search remembers what your photos show.</p>
+      </form>
 
-      <div className="gallery-toolbar">
-        <form className="search-bar" onSubmit={submitSearch}>
-          <input
-            className="input"
-            aria-label="Search your hikes"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search photos, species, trails…"
-            value={query}
-          />
-          <button className="button button-small" type="submit">Search</button>
-        </form>
-        <span className={`health-pill ${health?.ok ? '' : 'offline'}`}>
+      <div className="board-bar">
+        <div className="filter-chips" role="tablist" aria-label="Filter hikes">
+          {(['all', 'completed', 'planned'] as Filter[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={filter === key}
+              className={`chip ${filter === key ? 'on' : ''}`}
+              onClick={() => setFilter(key)}
+            >
+              {key === 'all' ? 'All hikes' : key === 'completed' ? 'Walked' : 'Planned'}
+              <span className="chip-count">{counts[key]}</span>
+            </button>
+          ))}
+        </div>
+        <span className={`health-pill ${health?.ok ? '' : 'offline'}`} title="Backend status">
           <span className="health-dot" />
-          {health?.ok ? `API ok · ${health.mongo ? 'Mongo ok' : 'Mongo offline'}` : 'API offline'}
-          {import.meta.env.VITE_USE_MOCKS === 'true' && <span className="mock-label">mock data</span>}
+          {health?.ok ? (health.mongo ? 'Synced with Atlas' : 'Atlas offline') : 'Offline'}
+          {import.meta.env.VITE_USE_MOCKS === 'true' && <span className="mock-label">sample data</span>}
         </span>
       </div>
 
-      {error && <div className="section"><ErrorBox message={error} retry={retryLoad} /></div>}
-      {loading && <SkeletonCards />}
-      {!loading && !error && hikes.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-              <path d="M3 19 9 8l4 7 3-5 5 9H3Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <h2>Your next story starts outside.</h2>
-          <p className="muted">Create a hike to keep its plan, track and memories together.</p>
-          <Link to="/new" className="button">Plan your first hike</Link>
-        </div>
-      )}
-      {!loading && !error && hikes.length > 0 && (
-        <div className="hike-grid">
-          {hikes.map((hike) => (
-            <Link className="hike-card" to={`/hikes/${hike.id}`} key={hike.id}>
-              <img
-                className="hike-cover"
-                src={hike.cover_media_id ? mediaUrl(hike.cover_media_id, 'thumb') : '/mock/chilterns.svg'}
-                alt=""
-                onError={(event) => { event.currentTarget.src = '/mock/chilterns.svg' }}
-              />
-              <div className="hike-card-body">
-                <div className="card-title-row">
-                  <div>
-                    <h2 className="card-title">{hike.title}</h2>
-                    <p className="trail-name">{hike.trail_name}</p>
-                  </div>
-                  <StatusBadge status={hike.status} />
-                </div>
-                <div className="card-meta">
-                  <span>◷ {formatDate(hike.date)}</span>
-                  {hike.distance_km != null && <span>↔ {hike.distance_km.toFixed(1)} km</span>}
-                  {hike.ascent_m != null && <span>↑ {Math.round(hike.ascent_m)} m</span>}
-                  <span>
-                    ✳ {hike.species_count ? `${hike.species_count} species` : 'No species yet'}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+      {error && <ErrorBox message={error} retry={retryLoad} />}
+      {loading && <SkeletonCards count={6} />}
+      {!loading && !error && <Masonry items={entries} />}
     </>
   )
 }
