@@ -13,6 +13,7 @@ from app.services.planning import (
     failed_summary,
     leave_by,
     local_start_to_utc,
+    missing_window_hours,
     naismith_minutes,
     run_checks,
     window_hours,
@@ -31,13 +32,19 @@ def make_forecast(
     prob: int | None = 10,
     overrides: dict[int, dict] | None = None,
     in_range: bool = True,
+    drop_hours: frozenset[int] = frozenset(),
 ) -> DayForecast:
-    """Synthetic 24-hour forecast; `overrides` changes fields for given UTC hours."""
+    """Synthetic 24-hour forecast; `overrides` changes fields for given UTC hours.
+
+    `drop_hours` removes hours, like parse_hourly does when Open-Meteo sends null.
+    """
     overrides = overrides or {}
     sunrise, sunset = sun_times(LAT, LON, day)
     hourly = []
     if in_range:
         for h in range(24):
+            if h in drop_hours:
+                continue
             fields = {"temp_c": temp, "gust_kmh": gust, "precip_prob": prob}
             fields.update(overrides.get(h, {}))
             hourly.append(
@@ -305,7 +312,9 @@ def test_hike_spanning_clock_change():
     assert dark.passed
     start_utc = local_start_to_utc(day, time(0, 30))
     assert [h.time.hour for h in window_hours(make_forecast(day=day), start_utc, 180)] == [0, 1, 2]
-    assert not check_named(checks, "Wind").passed  # 02:00 UTC hour is inside the window
+    # The 23:00 UTC hour on the 24th is not in the 25th's forecast, so weather checks fail.
+    wind = check_named(checks, "Wind")
+    assert not wind.passed and "missing 1 of 4 hours" in wind.detail
 
 
 def test_finish_before_dark_on_clock_change_day_uses_gmt():
@@ -316,3 +325,60 @@ def test_finish_before_dark_on_clock_change_day_uses_gmt():
     check = check_named(run(make_draft(start=time(13, 0)), make_forecast(day=day)), "Finish before dark")
     assert not check.passed
     assert "13:00 GMT" in check.detail and "16:00 GMT" in check.detail
+
+
+# --- forecast coverage gaps (unchecked hours must not count as safe) ------------------
+
+
+def test_missing_window_hours_lists_gaps():
+    start = datetime(2026, 10, 31, 9, 30, tzinfo=timezone.utc)
+    assert missing_window_hours(make_forecast(), start, 105) == []
+    gaps = missing_window_hours(make_forecast(drop_hours=frozenset({10})), start, 105)
+    assert gaps == [datetime(2026, 10, 31, 10, tzinfo=timezone.utc)]
+
+
+def test_null_hour_inside_window_fails_weather_checks():
+    checks = run(forecast=make_forecast(drop_hours=frozenset({10})))  # 09:00-12:00 hike
+    for name in ("Wind", "Rain", "Cold"):
+        check = check_named(checks, name)
+        assert not check.passed
+        assert "missing 1 of 3 hours" in check.detail and "10:00 UTC on 2026-10-31" in check.detail
+
+
+def test_null_hour_outside_window_is_ignored():
+    checks = run(forecast=make_forecast(drop_hours=frozenset({20})))
+    assert all_passed(checks), failed_summary(checks)
+
+
+def test_hike_crossing_utc_midnight_fails_weather_checks():
+    # 00:30 BST on 24 Oct is 23:30 UTC on the 23rd, which the 24th's forecast lacks.
+    day = date(2026, 10, 24)
+    checks = run(make_draft(start=time(0, 30)), make_forecast(day=day))
+    wind = check_named(checks, "Wind")
+    assert not wind.passed
+    assert "missing 1 of 4 hours" in wind.detail and "23:00 UTC on 2026-10-23" in wind.detail
+    assert not check_named(checks, "Rain").passed
+
+
+def test_cold_kit_still_passes_cold_check_with_gaps():
+    draft = make_draft(kit=["Warm gloves"])
+    check = check_named(run(draft, make_forecast(drop_hours=frozenset({10}))), "Cold")
+    assert check.passed
+
+
+def test_known_hazards_stay_visible_next_to_gaps():
+    # 65 km/h gust at 09:00, no data at 10:00, calm at 11:00.
+    forecast = make_forecast(overrides={9: {"gust_kmh": 65.0, "precip_prob": 90, "temp_c": -3.0}},
+                             drop_hours=frozenset({10}))
+    checks = run(forecast=forecast)
+    wind, rain, cold = (check_named(checks, n) for n in ("Wind", "Rain", "Cold"))
+    assert not wind.passed and "65 km/h" in wind.detail and "missing 1 of 3 hours" in wind.detail
+    assert not rain.passed and "90%" in rain.detail and "missing 1 of 3 hours" in rain.detail
+    assert not cold.passed and "-3.0 °C" in cold.detail and "missing 1 of 3 hours" in cold.detail
+    assert wind.detail.count(".") == 1  # still one sentence
+
+
+def test_all_hours_missing_gives_gap_sentence_only():
+    checks = run(forecast=make_forecast(in_range=False))
+    wind = check_named(checks, "Wind")
+    assert wind.detail.startswith("The forecast is missing 3 of 3 hours of the hike")
