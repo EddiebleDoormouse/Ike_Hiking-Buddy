@@ -189,7 +189,6 @@ def test_one_revision_emits_ordered_progress_events(
         "checks",
         "revise",
         "checks",
-        "done",
     ]
     expected_failed = [
         check["name"]
@@ -633,6 +632,7 @@ class FakeCollection:
 
     def __init__(self, documents: list[dict]):
         self.documents = documents
+        self.update_calls: list[tuple[dict, dict]] = []
 
     def find_one(self, query: dict) -> dict | None:
         expected = query["_id"]
@@ -651,10 +651,19 @@ class FakeCollection:
         ]
 
     def update_one(self, query: dict, update: dict) -> None:
+        self.update_calls.append((dict(query), dict(update)))
         target_id = query["_id"]
         document = next(
-            item for item in self.documents if item["_id"] == target_id
+            (item for item in self.documents if item["_id"] == target_id),
+            None,
         )
+        if document is None:
+            return
+        if (
+            "plan_run_id" in query
+            and document.get("plan_run_id") != query["plan_run_id"]
+        ):
+            return
         document.update(update["$set"])
 
 
@@ -708,18 +717,116 @@ def test_plan_router_saves_plan_with_real_planner_loop(
     )
     calls = patch_planner_calls(monkeypatch, make_forecast(), make_draft())
 
-    response = make_client(database).post("/hikes/hike-1/plan")
+    client = make_client(database)
+    response = client.post("/hikes/hike-1/plan")
 
     assert response.status_code == 200
     assert response.json()["final"]["est_duration_min"] == 209
     assert hike["plan"] == response.json()
     assert hike["plan_progress"]["stage"] == "done"
-    progress_response = make_client(database).get(
+    assert hike["plan_progress"]["run_id"] == hike["plan_run_id"]
+    progress_response = client.get(
         "/hikes/hike-1/plan/progress"
     )
     assert progress_response.status_code == 200
     assert progress_response.json() == hike["plan_progress"]
     assert "Fox" in calls["draft"][0]
+    queue_query, queue_update = database["hikes"].update_calls[0]
+    run_id = queue_update["$set"]["plan_run_id"]
+    assert queue_query == {"_id": "hike-1"}
+    assert queue_update["$set"]["plan_progress"]["stage"] == "queued"
+    assert queue_update["$set"]["plan_progress"]["run_id"] == run_id
+    assert all(
+        query.get("plan_run_id") == run_id
+        for query, _ in database["hikes"].update_calls[1:]
+    )
+    final_query, final_update = database["hikes"].update_calls[-1]
+    assert final_query == {"_id": "hike-1", "plan_run_id": run_id}
+    assert final_update["$set"]["plan"] == response.json()
+    assert final_update["$set"]["plan_progress"]["stage"] == "done"
+
+
+def test_superseded_plan_does_not_save_progress_or_plan(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A newer run prevents an older run's final write from applying."""
+    hike = make_hike()
+    database = FakeDatabase([hike], [])
+
+    def supersede_run(
+        hike: dict, based_on: dict | None, sightings: list[dict], on_progress
+    ) -> dict:
+        on_progress(
+            {
+                "stage": "checks",
+                "message": "Checks: 1 passed, 0 failed",
+                "revision": 0,
+                "failed": [],
+                "elapsed_ms": 1,
+                "updated_at": "2026-10-31T10:00:00+00:00",
+            }
+        )
+        hike["plan_run_id"] = "newer-run"
+        return {"revisions": 0, "result": "older plan"}
+
+    monkeypatch.setattr(plan_router.planner, "plan_hike", supersede_run)
+
+    response = make_client(database).post("/hikes/hike-1/plan")
+
+    assert response.status_code == 200
+    assert "plan" not in hike
+    assert hike["plan_run_id"] == "newer-run"
+    assert hike["plan_progress"]["stage"] == "checks"
+    original_run_id = hike["plan_progress"]["run_id"]
+    assert original_run_id != "newer-run"
+    final_query, final_update = next(
+        (query, update)
+        for query, update in database["hikes"].update_calls
+        if "plan" in update["$set"]
+    )
+    assert final_query["plan_run_id"] == original_run_id
+    assert final_update["$set"]["plan_progress"]["stage"] == "done"
+
+
+def test_superseded_plan_error_does_not_overwrite_progress(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """An older run's error event cannot replace a newer run's progress."""
+    hike = make_hike()
+    database = FakeDatabase([hike], [])
+
+    def supersede_then_fail(
+        hike: dict, based_on: dict | None, sightings: list[dict], on_progress
+    ) -> dict:
+        on_progress(
+            {
+                "stage": "draft",
+                "message": "Drafting the plan",
+                "revision": 0,
+                "failed": [],
+                "elapsed_ms": 1,
+                "updated_at": "2026-10-31T10:00:00+00:00",
+            }
+        )
+        hike["plan_run_id"] = "newer-run"
+        raise GeminiError("Gemini unavailable")
+
+    monkeypatch.setattr(plan_router.planner, "plan_hike", supersede_then_fail)
+
+    response = make_client(database).post("/hikes/hike-1/plan")
+
+    assert response.status_code == 502
+    assert hike["plan_run_id"] == "newer-run"
+    assert hike["plan_progress"]["stage"] == "draft"
+    original_run_id = hike["plan_progress"]["run_id"]
+    assert original_run_id != "newer-run"
+    error_query, error_update = next(
+        (query, update)
+        for query, update in database["hikes"].update_calls
+        if update["$set"].get("plan_progress", {}).get("stage") == "error"
+    )
+    assert error_query["plan_run_id"] == original_run_id
+    assert error_update["$set"]["plan_progress"]["run_id"] == original_run_id
 
 
 def test_plan_progress_is_idle_before_planning():

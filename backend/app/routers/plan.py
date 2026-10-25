@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,11 +34,14 @@ def find_hike(db: Any, hike_id: str) -> dict | None:
     return db["hikes"].find_one(query)
 
 
-def _save_progress(db: Any, hike_id: Any, event: dict[str, Any]) -> None:
+def _save_progress(
+    db: Any, hike_id: Any, run_id: str, event: dict[str, Any]
+) -> None:
     """Persist the most recent planner event without interrupting the request."""
     try:
         db["hikes"].update_one(
-            {"_id": hike_id}, {"$set": {"plan_progress": event}}
+            {"_id": hike_id, "plan_run_id": run_id},
+            {"$set": {"plan_progress": event}},
         )
     except Exception:
         logger.exception("failed to save plan progress")
@@ -48,6 +52,7 @@ def _error_progress(
     revision: int,
     failed: list[str],
     started: float,
+    run_id: str,
 ) -> dict[str, Any]:
     """Create a safe error event with the standard progress fields."""
     return {
@@ -57,6 +62,7 @@ def _error_progress(
         "failed": failed,
         "elapsed_ms": round((perf_counter() - started) * 1000),
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
     }
 
 
@@ -66,6 +72,27 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
     hike = find_hike(db, hike_id)
     if hike is None:
         raise HTTPException(status_code=404, detail="Hike not found")
+
+    run_id = uuid4().hex
+    started = perf_counter()
+    queued_progress = {
+        "stage": "queued",
+        "message": "Starting",
+        "revision": 0,
+        "failed": [],
+        "elapsed_ms": 0,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+    }
+    db["hikes"].update_one(
+        {"_id": hike["_id"]},
+        {
+            "$set": {
+                "plan_run_id": run_id,
+                "plan_progress": queued_progress,
+            }
+        },
+    )
 
     based_on = None
     based_on_id = hike.get("based_on_hike_id")
@@ -90,10 +117,10 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
     latest_progress: dict[str, Any] = {"revision": 0, "failed": []}
 
     def save_progress(event: dict) -> None:
+        event["run_id"] = run_id
         latest_progress.update(event)
-        _save_progress(db, hike["_id"], event)
+        _save_progress(db, hike["_id"], run_id, event)
 
-    started = perf_counter()
     try:
         plan = planner.plan_hike(
             hike, based_on, sightings, on_progress=save_progress
@@ -102,11 +129,13 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         _save_progress(
             db,
             hike["_id"],
+            run_id,
             _error_progress(
                 "Hike details are incomplete.",
                 latest_progress["revision"],
                 latest_progress["failed"],
                 started,
+                run_id,
             ),
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -114,16 +143,35 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         _save_progress(
             db,
             hike["_id"],
+            run_id,
             _error_progress(
                 "Plan could not be generated.",
                 latest_progress["revision"],
                 latest_progress["failed"],
                 started,
+                run_id,
             ),
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    db["hikes"].update_one({"_id": hike["_id"]}, {"$set": {"plan": plan}})
+    done_progress = {
+        "stage": "done",
+        "message": "Plan ready",
+        "revision": plan["revisions"],
+        "failed": [],
+        "elapsed_ms": round((perf_counter() - started) * 1000),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+    }
+    db["hikes"].update_one(
+        {"_id": hike["_id"], "plan_run_id": run_id},
+        {
+            "$set": {
+                "plan": plan,
+                "plan_progress": done_progress,
+            }
+        },
+    )
     return plan
 
 

@@ -34,7 +34,15 @@ TOP_SPECIES_N = 5
 NON_BLOCKING_CHECKS = {"Forecast available"}
 COPIED_FIELDS = ("route", "start", "stats", "pace_factor")
 DISCLAIMER = "This plan is a suggestion: check conditions before you go."
-PROGRESS_STAGES = ("forecast", "hazards", "draft", "checks", "revise", "done")
+PROGRESS_STAGES = (
+    "queued",
+    "forecast",
+    "hazards",
+    "draft",
+    "checks",
+    "revise",
+    "done",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -541,5 +549,4 @@ def plan_hike(
         "timings_ms": timings_ms,
         "created_at": created_at,
     }
-    _emit(on_progress, "done", "Plan ready", revisions, total_started)
     return result

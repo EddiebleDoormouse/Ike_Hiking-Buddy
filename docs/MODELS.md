@@ -11,11 +11,13 @@ All calls use the Gemini Interactions API. Do not set `temperature`, `top_p`,
 
 ## Progress
 
-`POST /hikes/{id}/plan` stores the latest planner event in `plan_progress`.
-Events include `stage`, `message`, `revision`, `failed`, `elapsed_ms`, and
-`updated_at` (UTC ISO timestamp). The UI can poll
-`GET /hikes/{id}/plan/progress`; it returns the latest event, or
-`{"stage": "idle", "message": "Not started"}` before planning begins.
+`POST /hikes/{id}/plan` first stores a `queued` event with a unique `run_id`.
+Progress events include `stage`, `message`, `revision`, `failed`, `elapsed_ms`,
+`updated_at` (UTC ISO timestamp), and `run_id`. Updates are guarded by the
+current run ID, so an older overlapping request cannot overwrite newer
+progress. The final `done` event is saved atomically with the plan.
+The UI can poll `GET /hikes/{id}/plan/progress`; it returns the latest event,
+or `{"stage": "idle", "message": "Not started"}` before planning begins.
 
 ## Latency
 
