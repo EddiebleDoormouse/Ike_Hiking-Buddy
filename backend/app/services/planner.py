@@ -5,7 +5,7 @@ import logging
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 from app.services import gemini, weather
 from app.services.planning import (
@@ -34,6 +34,7 @@ TOP_SPECIES_N = 5
 NON_BLOCKING_CHECKS = {"Forecast available"}
 COPIED_FIELDS = ("route", "start", "stats", "pace_factor")
 DISCLAIMER = "This plan is a suggestion: check conditions before you go."
+PROGRESS_STAGES = ("forecast", "hazards", "draft", "checks", "revise", "done")
 
 logger = logging.getLogger(__name__)
 
@@ -345,14 +346,41 @@ def _log_step(name: str, started: float, timings_ms: dict[str, int]) -> None:
     logger.info("planner step %s took %d ms", name, elapsed_ms)
 
 
+def _emit(
+    on_progress: Callable[[dict], None] | None,
+    stage: str,
+    message: str,
+    revision: int,
+    total_started: float,
+    failed: list[str] | None = None,
+) -> None:
+    """Send a progress event without letting callback failures stop planning."""
+    if on_progress is None:
+        return
+    event = {
+        "stage": stage,
+        "message": message,
+        "revision": revision,
+        "failed": failed or [],
+        "elapsed_ms": round((perf_counter() - total_started) * 1000),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        on_progress(event)
+    except Exception:
+        logger.exception("planner progress callback failed at stage %s", stage)
+
+
 def plan_hike(
     hike: dict,
     based_on: dict | None = None,
     sightings: list[dict] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
 ) -> dict:
     """Fetch hike conditions, draft a plan, and revise blocking failures."""
     total_started = perf_counter()
     timings_ms: dict[str, int] = {}
+    revisions = 0
     resolved = resolve_hike(hike, based_on)
     lat, lon = start_lat_lon(resolved)
     day = hike_day(resolved)
@@ -360,12 +388,26 @@ def plan_hike(
     pace_factor = resolved.get("pace_factor") or DEFAULT_PACE_FACTOR
 
     step_started = perf_counter()
+    _emit(
+        on_progress,
+        "forecast",
+        "Fetching the forecast",
+        revisions,
+        total_started,
+    )
     forecast = weather.get_day_forecast(lat, lon, day)
     _log_step("forecast", step_started, timings_ms)
     naismith_min = naismith_minutes(distance_km, ascent_m, pace_factor)
     leave_by_utc = leave_by(forecast.sunset, naismith_min)
 
     step_started = perf_counter()
+    _emit(
+        on_progress,
+        "hazards",
+        "Researching closures and hazards",
+        revisions,
+        total_started,
+    )
     researched = gemini.research_hazards(
         resolved.get("trail_name", "Unknown trail"), day, lat, lon
     )
@@ -388,9 +430,26 @@ def plan_hike(
     )
 
     step_started = perf_counter()
+    _emit(
+        on_progress,
+        "draft",
+        "Drafting the plan",
+        revisions,
+        total_started,
+    )
     draft = gemini.draft_plan(context)
     checks = _run_plan_checks(
         draft, forecast, distance_km, ascent_m, pace_factor, hazards
+    )
+    failed_checks = [check.name for check in checks if not check.passed]
+    _emit(
+        on_progress,
+        "checks",
+        f"Checks: {len(checks) - len(failed_checks)} passed, "
+        f"{len(failed_checks)} failed",
+        revisions,
+        total_started,
+        failed_checks,
     )
     iterations = [
         {
@@ -401,8 +460,21 @@ def plan_hike(
     ]
     _log_step("draft", step_started, timings_ms)
 
-    revisions = 0
-    while revisions < MAX_REVISIONS and blocking_failures(checks, forecast):
+    while revisions < MAX_REVISIONS:
+        failed_blocking = blocking_failures(checks, forecast)
+        if not failed_blocking:
+            break
+        next_revision = revisions + 1
+        failed_names = [check.name for check in failed_blocking]
+        _emit(
+            on_progress,
+            "revise",
+            f"Revising ({next_revision}/{MAX_REVISIONS}): "
+            f"{', '.join(failed_names)}",
+            next_revision,
+            total_started,
+            failed_names,
+        )
         level = (
             FAST_REVISE_THINKING_LEVEL
             if perf_counter() - total_started > SLOW_LOOP_S
@@ -411,13 +483,23 @@ def plan_hike(
         step_started = perf_counter()
         draft = gemini.revise_plan(
             draft,
-            failed_summary(blocking_failures(checks, forecast)),
+            failed_summary(failed_blocking),
             context,
             thinking_level=level,
         )
-        revisions += 1
+        revisions = next_revision
         checks = _run_plan_checks(
             draft, forecast, distance_km, ascent_m, pace_factor, hazards
+        )
+        failed_checks = [check.name for check in checks if not check.passed]
+        _emit(
+            on_progress,
+            "checks",
+            f"Checks: {len(checks) - len(failed_checks)} passed, "
+            f"{len(failed_checks)} failed",
+            revisions,
+            total_started,
+            failed_checks,
         )
         iterations.append(
             {
@@ -439,7 +521,7 @@ def plan_hike(
     created_at = datetime.now(timezone.utc).isoformat()
     timings_ms["total"] = round((perf_counter() - total_started) * 1000)
     logger.info("planner step %s took %d ms", "total", timings_ms["total"])
-    return {
+    result = {
         "final": final,
         "checks": final_checks,
         "all_passed": all(check.passed for check in checks),
@@ -459,3 +541,5 @@ def plan_hike(
         "timings_ms": timings_ms,
         "created_at": created_at,
     }
+    _emit(on_progress, "done", "Plan ready", revisions, total_started)
+    return result

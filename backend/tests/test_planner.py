@@ -167,6 +167,70 @@ def test_failed_draft_is_revised_once_and_stops_when_passing(
     assert "Duration realistic" in calls["revise"][0]["failed"]
 
 
+def test_one_revision_emits_ordered_progress_events(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Progress reports each planning stage and the initial failed checks."""
+    patch_planner_calls(
+        monkeypatch,
+        make_forecast(),
+        make_draft(duration=1000),
+        [make_draft()],
+    )
+    events = []
+
+    result = planner.plan_hike(make_hike(), on_progress=events.append)
+
+    assert result["revisions"] == 1
+    assert [event["stage"] for event in events] == [
+        "forecast",
+        "hazards",
+        "draft",
+        "checks",
+        "revise",
+        "checks",
+        "done",
+    ]
+    expected_failed = [
+        check["name"]
+        for check in result["iterations"][0]["checks"]
+        if not check["passed"]
+    ]
+    assert events[3]["failed"] == expected_failed
+    assert "Duration realistic" in events[3]["failed"]
+    assert events[3]["message"].endswith(
+        f"{len(expected_failed)} failed"
+    )
+    assert events[4]["revision"] == 1
+    assert events[4]["message"].startswith("Revising (1/2): ")
+    assert all(
+        set(event)
+        == {
+            "stage",
+            "message",
+            "revision",
+            "failed",
+            "elapsed_ms",
+            "updated_at",
+        }
+        for event in events
+    )
+
+
+def test_progress_callback_failure_does_not_break_planning(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A progress storage failure never prevents a plan from being returned."""
+    patch_planner_calls(monkeypatch, make_forecast(), make_draft())
+
+    def fail_progress(event: dict) -> None:
+        raise RuntimeError("progress store unavailable")
+
+    result = planner.plan_hike(make_hike(), on_progress=fail_progress)
+
+    assert result["final"]["summary_md"]
+
+
 def test_always_failing_draft_stops_after_two_revisions(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -649,7 +713,33 @@ def test_plan_router_saves_plan_with_real_planner_loop(
     assert response.status_code == 200
     assert response.json()["final"]["est_duration_min"] == 209
     assert hike["plan"] == response.json()
+    assert hike["plan_progress"]["stage"] == "done"
+    progress_response = make_client(database).get(
+        "/hikes/hike-1/plan/progress"
+    )
+    assert progress_response.status_code == 200
+    assert progress_response.json() == hike["plan_progress"]
     assert "Fox" in calls["draft"][0]
+
+
+def test_plan_progress_is_idle_before_planning():
+    """A hike without saved progress reports an idle state."""
+    response = make_client(FakeDatabase([make_hike()], [])).get(
+        "/hikes/hike-1/plan/progress"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"stage": "idle", "message": "Not started"}
+
+
+def test_plan_progress_returns_404_for_unknown_hike():
+    """Progress polling for an unknown hike returns not found."""
+    response = make_client(FakeDatabase([], [])).get(
+        "/hikes/missing/plan/progress"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Hike not found"
 
 
 def test_plan_router_returns_404_for_unknown_hike():
@@ -687,6 +777,8 @@ def test_plan_router_returns_400_for_missing_start_and_route_stats():
 
     assert response.status_code == 400
     assert "start point" in response.json()["detail"]
+    assert hike["plan_progress"]["stage"] == "error"
+    assert hike["plan_progress"]["message"] == "Hike details are incomplete."
 
 
 def test_plan_router_returns_502_for_gemini_failure(monkeypatch: pytest.MonkeyPatch):
@@ -699,12 +791,15 @@ def test_plan_router_returns_502_for_gemini_failure(monkeypatch: pytest.MonkeyPa
         raise GeminiError("Gemini unavailable")
 
     monkeypatch.setattr(planner.gemini, "research_hazards", fail_research)
-    response = make_client(FakeDatabase([make_hike()], [])).post(
+    hike = make_hike()
+    response = make_client(FakeDatabase([hike], [])).post(
         "/hikes/hike-1/plan"
     )
 
     assert response.status_code == 502
     assert response.json()["detail"] == "Gemini unavailable"
+    assert hike["plan_progress"]["stage"] == "error"
+    assert hike["plan_progress"]["message"] == "Plan could not be generated."
 
 
 @pytest.mark.live

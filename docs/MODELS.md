@@ -9,6 +9,14 @@
 All calls use the Gemini Interactions API. Do not set `temperature`, `top_p`,
 `top_k`, or `thinking_budget`.
 
+## Progress
+
+`POST /hikes/{id}/plan` stores the latest planner event in `plan_progress`.
+Events include `stage`, `message`, `revision`, `failed`, `elapsed_ms`, and
+`updated_at` (UTC ISO timestamp). The UI can poll
+`GET /hikes/{id}/plan/progress`; it returns the latest event, or
+`{"stage": "idle", "message": "Not started"}` before planning begins.
+
 ## Latency
 
 Live run, 25 Oct 2026, all calls at `high`, for a synthetic Chilterns hike (Tring to Ivinghoe Beacon, 13 km, 330 m ascent) on Sat 31 Oct:
