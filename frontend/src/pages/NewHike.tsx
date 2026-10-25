@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createHike, listHikes, planHike } from '../api/client'
 import type { Hike, HikeCard } from '../api/types'
-import { ErrorBox, PageLoading, StepLoader } from '../components/Shared'
+import { ErrorBox, PageLoading, PlanProgressLoader } from '../components/Shared'
 
 function nextSaturday(): string {
   const date = new Date()
@@ -102,7 +102,7 @@ function NewHike() {
         </div>
       )}
       {submitting ? (
-        <div className="form-panel"><StepLoader label="Working on your plan" /></div>
+        <div className="form-panel"><PlanProgressLoader hikeId={createdHike?.id} label="Working on your plan" /></div>
       ) : (
         <form className="panel form-panel" onSubmit={(event) => void handleSubmit(event)}>
           <div className="form-grid">

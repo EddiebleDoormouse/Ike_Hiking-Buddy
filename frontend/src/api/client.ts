@@ -8,6 +8,7 @@ import type {
   HikeStats,
   MediaItem,
   Plan,
+  PlanProgress,
   RecapResponse,
   SearchResult,
   Sighting,
@@ -233,14 +234,44 @@ export async function uploadTrack(hikeId: string, file: File): Promise<TrackUplo
   })
 }
 
+const mockProgress = new Map<string, PlanProgress>()
+
+const MOCK_PLAN_STEPS: PlanProgress[] = [
+  { stage: 'forecast', message: 'Fetching the forecast' },
+  { stage: 'hazards', message: 'Researching closures and hazards' },
+  { stage: 'draft', message: 'Drafting the plan' },
+  { stage: 'checks', message: 'Checks: 6 passed, 1 failed', failed: ['Wind'] },
+  { stage: 'revise', message: 'Revising (1/2): Wind', revision: 1, failed: ['Wind'] },
+  { stage: 'checks', message: 'Checks: 7 passed, 0 failed', revision: 1, failed: [] },
+]
+
+async function playMockProgress(hikeId: string): Promise<void> {
+  const started = Date.now()
+  for (const step of MOCK_PLAN_STEPS) {
+    mockProgress.set(hikeId, { revision: 0, failed: [], ...step, elapsed_ms: Date.now() - started })
+    await sleep(900)
+  }
+}
+
+/** Latest planner stage for a hike, or null when the backend has no progress endpoint. */
+export async function getPlanProgress(hikeId: string): Promise<PlanProgress | null> {
+  if (USE_MOCKS) return mockProgress.get(hikeId) ?? null
+  try {
+    return await request<PlanProgress>(`/hikes/${encodeURIComponent(hikeId)}/plan/progress`)
+  } catch {
+    return null
+  }
+}
+
 export async function planHike(hikeId: string): Promise<Plan> {
   if (USE_MOCKS) {
-    await sleep(600)
+    await playMockProgress(hikeId)
     const hike = mockState.hikes.find((item) => item.id === hikeId)
     if (!hike) throw new Error('Hike not found.')
     const template = mockState.hikes.find((item) => item.id === 'hike-kinder-planned')?.plan
     if (!template) throw new Error('The mock plan is not available.')
     hike.plan = template
+    mockProgress.set(hikeId, { stage: 'done', message: 'Plan ready', revision: 1, failed: [] })
     return hike.plan
   }
   return request<Plan>(`/hikes/${encodeURIComponent(hikeId)}/plan`, { method: 'POST' })
