@@ -16,6 +16,7 @@ import pytest
 from app.db import get_db, get_files
 from app.main import app
 from app.models import Candidate, MediaAnalysis
+from app.routers import media as media_router
 from app.services import gemini
 from app.services.images import thumbnail, to_display_jpeg
 
@@ -102,6 +103,13 @@ class FakeCollection:
         self.documents.append(stored)
         return SimpleNamespace(inserted_id=stored["_id"])
 
+    def delete_one(self, filters):
+        document = self.find_one(filters)
+        if document is None:
+            return SimpleNamespace(deleted_count=0)
+        self.documents.remove(document)
+        return SimpleNamespace(deleted_count=1)
+
     def find_one(self, filters):
         return next(
             (document for document in self.documents if self._matches(document, filters)),
@@ -154,9 +162,19 @@ class FakeDownload:
     def __init__(self, record):
         self._data = record["data"]
         self.metadata = record["metadata"]
+        self._position = 0
+        self.closed = False
 
-    def read(self):
-        return self._data
+    def read(self, size=-1):
+        if size < 0:
+            size = len(self._data) - self._position
+        end = min(self._position + size, len(self._data))
+        chunk = self._data[self._position:end]
+        self._position = end
+        return chunk
+
+    def close(self):
+        self.closed = True
 
 
 class FakeBucket:
@@ -164,6 +182,7 @@ class FakeBucket:
 
     def __init__(self):
         self.files = {}
+        self.last_download = None
 
     def upload_from_stream(self, filename, data, metadata=None):
         file_id = ObjectId()
@@ -174,10 +193,14 @@ class FakeBucket:
         }
         return file_id
 
+    def delete(self, file_id):
+        self.files.pop(file_id, None)
+
     def open_download_stream(self, file_id):
         if file_id not in self.files:
             raise NoFile(f"No file with id {file_id}")
-        return FakeDownload(self.files[file_id])
+        self.last_download = FakeDownload(self.files[file_id])
+        return self.last_download
 
 
 @pytest.fixture
@@ -196,6 +219,17 @@ def client(fake_db, fake_bucket):
     app.dependency_overrides[get_files] = lambda: fake_bucket
     try:
         with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_no_raise(fake_db, fake_bucket):
+    app.dependency_overrides[get_db] = lambda: fake_db
+    app.dependency_overrides[get_files] = lambda: fake_bucket
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.clear()
@@ -246,6 +280,20 @@ def sample_analysis(is_organism=True):
 def make_jpeg(size=(1800, 1200)):
     output = BytesIO()
     Image.new("RGB", size, "darkgreen").save(output, format="JPEG")
+    return output.getvalue()
+
+
+def make_gps_jpeg(size=(1200, 800)):
+    source = Image.new("RGB", size, "darkgreen")
+    exif = Image.Exif()
+    exif[0x8825] = {
+        1: "N",
+        2: (51.5, 30.0, 0.0),
+        3: "W",
+        4: (0.0, 7.0, 0.0),
+    }
+    output = BytesIO()
+    source.save(output, format="JPEG", exif=exif)
     return output.getvalue()
 
 
@@ -324,6 +372,36 @@ def test_heic_upload_with_octet_stream_is_inferred_as_photo(
         assert image.format == "JPEG"
 
 
+def test_original_photo_is_served_without_exif_gps(
+    client,
+    fake_bucket,
+    monkeypatch,
+):
+    hike_id = create_hike(client).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+    original = make_gps_jpeg()
+    with Image.open(BytesIO(original)) as image:
+        assert image.getexif().get_ifd(0x8825)
+
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("gps-photo.jpg", original, "image/jpeg")},
+    )
+    assert upload.status_code == 201
+    media = upload.json()["media"]
+    original_file_id = ObjectId(media["original_file_id"])
+    assert fake_bucket.files[original_file_id]["data"] == original
+
+    response = client.get(f"/media/{media['id']}/file?variant=original")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    with Image.open(BytesIO(response.content)) as image:
+        assert image.size == (1200, 800)
+        exif = image.getexif()
+        assert not exif or 0x8825 not in exif
+
+
 def test_landscape_analysis_does_not_create_sighting(
     client,
     fake_db,
@@ -384,6 +462,23 @@ def test_video_upload_is_stored_without_analysis(client, fake_bucket, monkeypatc
     analysis.assert_not_called()
 
 
+def test_video_download_streams_large_file_and_closes_stream(client, fake_bucket):
+    hike_id = create_hike(client).json()["id"]
+    video = b"v" * (3 * 1024 * 1024)
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("clip.mp4", video, "video/mp4")},
+    )
+    media_id = upload.json()["media"]["id"]
+
+    response = client.get(f"/media/{media_id}/file")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "video/mp4"
+    assert response.content == video
+    assert fake_bucket.last_download.closed
+
+
 def test_text_form_upload_creates_note_without_a_file(client, fake_bucket):
     hike_id = create_hike(client).json()["id"]
     note = "The path was muddy after rain."
@@ -423,6 +518,29 @@ def test_gemini_error_returns_friendly_502_without_storing_media(
     assert response.json()["detail"] == (
         "Gemini couldn't analyse this file right now. Please try again in a moment."
     )
+    assert fake_bucket.files == {}
+    assert fake_db.media.documents == []
+
+
+def test_sighting_insert_failure_cleans_up_media_and_gridfs(
+    client_no_raise,
+    fake_db,
+    fake_bucket,
+    monkeypatch,
+):
+    hike_id = create_hike(client_no_raise).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+
+    def fail_insert(document):
+        raise RuntimeError("sighting insert failed")
+
+    monkeypatch.setattr(fake_db.sightings, "insert_one", fail_insert)
+    response = client_no_raise.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("ivy.jpg", make_jpeg((80, 60)), "image/jpeg")},
+    )
+
+    assert response.status_code == 500
     assert fake_bucket.files == {}
     assert fake_db.media.documents == []
 
@@ -478,6 +596,27 @@ def test_empty_upload_is_rejected(client, fake_bucket):
     assert fake_bucket.files == {}
 
 
+def test_oversize_upload_is_rejected_before_storage(
+    client,
+    fake_db,
+    fake_bucket,
+    monkeypatch,
+):
+    monkeypatch.setattr(media_router, "MAX_UPLOAD_BYTES", 10)
+    hike_id = create_hike(client).json()["id"]
+
+    response = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("large.mp4", b"x" * 11, "video/mp4")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "File is too large (max 100 MB)"
+    assert fake_bucket.files == {}
+    assert fake_db.media.documents == []
+    assert fake_db.sightings.documents == []
+
+
 def test_get_media_and_photo_file_variants(
     client,
     fake_bucket,
@@ -508,7 +647,9 @@ def test_get_media_and_photo_file_variants(
         assert max(image.size) <= 1600
     with Image.open(BytesIO(thumb.content)) as image:
         assert max(image.size) <= 400
-    assert original_response.content == original
+    assert original_response.headers["content-type"] == "image/jpeg"
+    with Image.open(BytesIO(original_response.content)) as image:
+        assert image.size == (2400, 1200)
 
 
 def test_audio_display_variant_falls_back_to_original(
@@ -566,10 +707,11 @@ def test_mongodb_photo_upload_detail_and_file_variants(monkeypatch):
                     f"/media/{media_id}/file?variant={variant}"
                 )
                 assert response.status_code == 200
-            assert (
-                client.get(f"/media/{media_id}/file?variant=original").content
-                == original
+            original_response = client.get(
+                f"/media/{media_id}/file?variant=original"
             )
+            with Image.open(BytesIO(original_response.content)) as image:
+                assert image.size == (1800, 1200)
     finally:
         if hike_id is not None:
             hike_oid = ObjectId(hike_id)

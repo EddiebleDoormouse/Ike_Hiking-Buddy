@@ -2,14 +2,15 @@
 
 import logging
 import mimetypes
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from gridfs import GridFSBucket
 from gridfs.errors import NoFile
 from pymongo.database import Database
@@ -21,6 +22,7 @@ from app.services.images import thumbnail, to_display_jpeg
 
 router = APIRouter(tags=["media"])
 logger = logging.getLogger(__name__)
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MediaKind = Literal["photo", "audio", "video", "note"]
 IMAGE_EXTENSIONS = {".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac"}
@@ -138,6 +140,18 @@ def _upload_file(
     )
 
 
+def _stream_chunks(stream: Any) -> Iterator[bytes]:
+    """Yield a GridFS file in bounded chunks, then close its stream."""
+    try:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        stream.close()
+
+
 @router.post(
     "/hikes/{hike_id}/media",
     response_model=UploadMediaResponse,
@@ -161,7 +175,12 @@ def upload_media(
         raise HTTPException(status_code=400, detail="A file or note text is required")
 
     if file is not None:
-        data = file.file.read()
+        data = file.file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="File is too large (max 100 MB)",
+            )
         if not data:
             raise HTTPException(status_code=400, detail="File is empty")
         filename = file.filename or "upload"
@@ -237,23 +256,6 @@ def upload_media(
     original_file_id = None
     display_file_id = None
     thumb_file_id = None
-    if file is not None:
-        original_file_id = _upload_file(files, filename, data, mime)
-        if display is not None and thumb is not None:
-            stem = Path(filename).stem or "image"
-            display_file_id = _upload_file(
-                files,
-                f"{stem}.jpg",
-                display,
-                "image/jpeg",
-            )
-            thumb_file_id = _upload_file(
-                files,
-                f"{stem}_thumb.jpg",
-                thumb,
-                "image/jpeg",
-            )
-
     now = datetime.now(timezone.utc)
     media_document = {
         "hike_id": hike_oid,
@@ -272,32 +274,79 @@ def upload_media(
         "is_organism": analysis.is_organism if analysis is not None else False,
         "created_at": now,
     }
-    media_result = db.media.insert_one(media_document)
-    media_document["_id"] = media_result.inserted_id
-
+    uploaded_file_ids = []
+    media_id = None
     sighting_document = None
-    if analysis is not None and analysis.is_organism:
-        candidates = [candidate.model_dump() for candidate in analysis.candidates]
-        sighting_document = {
-            "hike_id": hike_oid,
-            "media_id": media_result.inserted_id,
-            "candidates": candidates,
-            "verification": {
-                "status": "unsure",
-                "chosen": candidates[0] if candidates else None,
-                "gbif_nearby_count": None,
-                "gbif_key": None,
-                "specialist": None,
-                "specialist_agrees": None,
-                "reasons": ["Not verified yet"],
-            },
-            "location": None,
-            "seen_at": None,
-            "safety_note": analysis.safety_note,
-            "created_at": now,
-        }
-        sighting_result = db.sightings.insert_one(sighting_document)
-        sighting_document["_id"] = sighting_result.inserted_id
+    try:
+        if file is not None:
+            original_file_id = _upload_file(files, filename, data, mime)
+            uploaded_file_ids.append(original_file_id)
+            if display is not None and thumb is not None:
+                stem = Path(filename).stem or "image"
+                display_file_id = _upload_file(
+                    files,
+                    f"{stem}.jpg",
+                    display,
+                    "image/jpeg",
+                )
+                uploaded_file_ids.append(display_file_id)
+                thumb_file_id = _upload_file(
+                    files,
+                    f"{stem}_thumb.jpg",
+                    thumb,
+                    "image/jpeg",
+                )
+                uploaded_file_ids.append(thumb_file_id)
+            media_document["original_file_id"] = original_file_id
+            media_document["display_file_id"] = display_file_id
+            media_document["thumb_file_id"] = thumb_file_id
+
+        media_result = db.media.insert_one(media_document)
+        media_id = media_result.inserted_id
+        media_document["_id"] = media_id
+
+        if analysis is not None and analysis.is_organism:
+            candidates = [candidate.model_dump() for candidate in analysis.candidates]
+            sighting_document = {
+                "hike_id": hike_oid,
+                "media_id": media_id,
+                "candidates": candidates,
+                "verification": {
+                    "status": "unsure",
+                    "chosen": candidates[0] if candidates else None,
+                    "gbif_nearby_count": None,
+                    "gbif_key": None,
+                    "specialist": None,
+                    "specialist_agrees": None,
+                    "reasons": ["Not verified yet"],
+                },
+                "location": None,
+                "seen_at": None,
+                "safety_note": analysis.safety_note,
+                "created_at": now,
+            }
+            sighting_result = db.sightings.insert_one(sighting_document)
+            sighting_document["_id"] = sighting_result.inserted_id
+    except Exception:
+        for file_id in uploaded_file_ids:
+            try:
+                files.delete(file_id)
+            except Exception:
+                logger.warning(
+                    "Failed to clean up GridFS file %s after upload failure",
+                    file_id,
+                    exc_info=True,
+                )
+        if media_id is not None:
+            try:
+                db.media.delete_one({"_id": media_id})
+            except Exception:
+                logger.warning(
+                    "Failed to clean up media document %s after upload failure",
+                    media_id,
+                    exc_info=True,
+                )
+        raise
 
     return UploadMediaResponse(
         media=media_from_doc(media_document),
@@ -329,7 +378,7 @@ def get_media_file(
     db: Database = Depends(get_db),
     files: GridFSBucket = Depends(get_files),
 ) -> Response:
-    """Stream a media file, using a photo display variant by default."""
+    """Stream media; re-encode photo originals to strip EXIF GPS before serving."""
     media_oid = _object_id(media_id)
     document = db.media.find_one({"_id": media_oid})
     if document is None:
@@ -350,6 +399,27 @@ def get_media_file(
     except NoFile as exc:
         raise HTTPException(status_code=404, detail="Media file not found") from exc
 
+    is_photo_original = (
+        document["kind"] == "photo"
+        and selected_id == document.get("original_file_id")
+    )
+    if is_photo_original:
+        try:
+            raw = stream.read()
+        finally:
+            stream.close()
+        safe_image = to_display_jpeg(
+            raw,
+            document["filename"],
+            max_px=100_000,
+        )
+        filename = f"{Path(document['filename']).stem or 'image'}.jpg"
+        return Response(
+            content=safe_image,
+            media_type="image/jpeg",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+
     if is_jpeg_variant:
         media_type = "image/jpeg"
         filename = f"{Path(document['filename']).stem or 'image'}.jpg"
@@ -357,8 +427,8 @@ def get_media_file(
         media_type = document["mime"]
         filename = document["filename"]
     filename = Path(filename.replace("\\", "/")).name.replace('"', "")
-    return Response(
-        content=stream.read(),
+    return StreamingResponse(
+        _stream_chunks(stream),
         media_type=media_type,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
