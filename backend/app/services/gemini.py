@@ -136,13 +136,20 @@ def _media_line(index: int, media: dict) -> str:
 
 
 def _sighting_line(sighting: dict) -> str:
-    """One sighting as a prompt line: name, status word, and time seen."""
+    """One sighting as a prompt line: name, status, evidence and time seen."""
     name = sighting.get("name") or "unidentified species"
     scientific = sighting.get("scientific_name")
     label = f"{name} ({scientific})" if scientific else name
     status = sighting.get("status") or "unsure"
     when = sighting.get("seen_at") or "time unknown"
-    return f"- {label} — {status} — seen {when}"
+    line = f"- {label} — {status} — seen {when}"
+    confidence = sighting.get("confidence")
+    if confidence is not None:
+        line += f" — ID confidence {confidence:.0%}"
+    reasons = sighting.get("reasons") or []
+    if reasons:
+        line += f" — basis: {'; '.join(str(reason) for reason in reasons)}"
+    return line
 
 
 def build_recap_prompt(hike_bundle: dict[str, Any]) -> str:

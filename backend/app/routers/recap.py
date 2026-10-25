@@ -86,9 +86,13 @@ def _hike_doc_or_404(database: Any, hike_id: str) -> dict:
     return doc
 
 
-def _hike_id_variants(hike_id: str) -> list:
-    """The shapes media/sightings may store hike_id in (string or ObjectId)."""
-    variants: list = [hike_id]
+def _hike_id_variants(hike_id: str, hike: dict) -> list:
+    """The shapes media/sightings may store hike_id in (string or ObjectId).
+
+    Includes the canonical string form of the loaded hike's _id so an
+    uppercase or differently-typed path id still matches string-linked docs.
+    """
+    variants: list = [hike_id, str(hike["_id"])]
     try:
         variants.append(ObjectId(hike_id))
     except InvalidId:
@@ -149,7 +153,11 @@ def _media_sort_key(media_doc: dict) -> float:
 
 
 def _sighting_entry(sighting: dict) -> dict:
-    """Pick the species name, status word and time out of a sighting doc."""
+    """Pick the species name, status, evidence and time from a sighting doc.
+
+    Carries the chosen candidate's confidence and the verification reasons
+    so the recap's species claims can show how sure each ID is and why.
+    """
     verification = sighting.get("verification") or {}
     chosen = verification.get("chosen") or {}
     candidates = sighting.get("candidates") or []
@@ -161,6 +169,8 @@ def _sighting_entry(sighting: dict) -> dict:
             chosen.get("scientific_name") or top.get("scientific_name")
         ),
         "status": _STATUS_WORDS.get(status, "unsure"),
+        "confidence": chosen.get("confidence") or top.get("confidence"),
+        "reasons": verification.get("reasons") or [],
         "seen_at": _local_time(sighting.get("seen_at")),
     }
 
@@ -209,7 +219,7 @@ def create_recap(hike_id: str) -> RecapResponse:
     """Generate the hike recap, store it on the hike, and return it."""
     database = db.get_db()
     hike = _hike_doc_or_404(database, hike_id)
-    related = {"hike_id": {"$in": _hike_id_variants(hike_id)}}
+    related = {"hike_id": {"$in": _hike_id_variants(hike_id, hike)}}
     media_docs = list(database.media.find(related))
     sighting_docs = list(database.sightings.find(related))
     bundle = build_hike_bundle(

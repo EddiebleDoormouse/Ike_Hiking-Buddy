@@ -153,6 +153,7 @@ def fixture_db() -> SimpleNamespace:
                     "confidence": 0.92,
                     "group": "mammal",
                 },
+                "reasons": ["GBIF: 42 records within 5 km"],
             },
             "seen_at": datetime(2026, 1, 10, 15, 1),
         },
@@ -292,6 +293,27 @@ def test_recap_marks_plausible_species_probably(wired):
     assert "unsure" in warbler
     # the output contract repeats the probably wording and excludes unsure
     assert 'Status cell exactly as given' in prompt
+
+
+def test_recap_sighting_lines_carry_confidence_and_basis(wired):
+    """Species claims show how sure each ID is and on what basis."""
+    client.post(f"/hikes/{HIKE_ID}/recap")
+
+    prompt = wired.captured["input"][0]["text"]
+    fox = next(line for line in prompt.splitlines() if "Red fox" in line)
+
+    assert "ID confidence 92%" in fox
+    assert "GBIF: 42 records within 5 km" in fox
+
+
+def test_recap_uppercase_hike_id_matches_string_linked_docs(wired):
+    """An uppercase path id still finds media storing the lowercase string."""
+    response = client.post(f"/hikes/{HIKE_ID.upper()}/recap")
+
+    assert response.status_code == 200
+    prompt = wired.captured["input"][0]["text"]
+    # media doc is linked by the lowercase string form of the hike id
+    assert "Fox by the wall" in prompt
 
 
 def test_recap_unknown_hike_returns_404(wired):
