@@ -101,7 +101,18 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
     based_on = None
     based_on_id = hike.get("based_on_hike_id")
     if based_on_id is not None:
-        based_on = find_hike(db, str(based_on_id))
+        try:
+            based_on = find_hike(db, str(based_on_id))
+        except Exception:
+            _save_progress(
+                db,
+                hike["_id"],
+                run_id,
+                _error_progress(
+                    "Based-on hike could not be loaded.", 0, [], started, run_id
+                ),
+            )
+            raise
         if based_on is None:
             _save_progress(
                 db,
