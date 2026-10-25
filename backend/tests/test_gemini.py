@@ -2,6 +2,8 @@
 
 import base64
 import json
+import os
+import time
 
 import httpx
 import pytest
@@ -255,3 +257,43 @@ def test_http_400_is_wrapped_and_not_retried():
         analyze_media(b"image", "image/jpeg", {})
 
     assert route.call_count == 1
+
+
+@pytest.mark.live
+@pytest.mark.skipif(
+    not os.environ.get("GEMINI_API_KEY"),
+    reason="GEMINI_API_KEY is not set",
+)
+def test_live_ivy_photo_analysis():
+    """Check real identification for the public-domain ivy test image."""
+    response = httpx.get(
+        "https://upload.wikimedia.org/wikipedia/commons/9/9e/Hedera_helix_lombozata.jpg",
+        headers={
+            "User-Agent": "HikingBuddyTest/0.1 (edouard.vincenzi@outlook.com)",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    from app.services.images import to_display_jpeg
+
+    display = to_display_jpeg(response.content, "Hedera_helix_lombozata.jpg")
+    started = time.perf_counter()
+    result = analyze_media(
+        display,
+        "image/jpeg",
+        {
+            "place": "Epping Forest",
+            "lat": 51.65,
+            "lon": 0.05,
+            "date": "2026-10-24",
+            "hike_title": "Autumn loop",
+        },
+    )
+    latency_ms = (time.perf_counter() - started) * 1000
+    print(f"Live Gemini ivy analysis latency: {latency_ms:.0f} ms")
+
+    assert result.is_organism
+    assert 1 <= len(result.candidates) <= 3
+    assert result.candidates[0].group == "plant"
+    assert any("Hedera" in candidate.scientific_name for candidate in result.candidates)

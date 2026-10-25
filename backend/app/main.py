@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import get_client
+from app.routers.hikes import router as hikes_router
+from app.routers.media import router as media_router
 
 app = FastAPI(title="Hiking Buddy")
 app.add_middleware(
@@ -12,6 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(hikes_router)
+app.include_router(media_router)
 
 
 @app.get("/health")
