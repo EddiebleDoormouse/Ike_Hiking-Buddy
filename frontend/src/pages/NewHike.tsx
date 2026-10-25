@@ -116,7 +116,10 @@ function NewHike() {
               <>
                 <label>
                   <span className="field-label">Base this on a completed hike</span>
-                  <select className="select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+                  <select className="select" value={selectedId} onChange={(event) => {
+                    setCreatedHike(null)
+                    setSelectedId(event.target.value)
+                  }}>
                     {completedHikes.map((hike) => (
                       <option key={hike.id} value={hike.id}>{hike.title} · {hike.trail_name}</option>
                     ))}
@@ -124,15 +127,25 @@ function NewHike() {
                 </label>
                 <label>
                   <span className="field-label">Planned date</span>
-                  <input className="input" type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
+                  <input className="input" type="date" value={date} onChange={(event) => {
+                    setCreatedHike(null)
+                    setDate(event.target.value)
+                  }} required />
                 </label>
                 <label>
                   <span className="field-label">Hike title</span>
-                  <input className="input" value={displayedTitle} onChange={(event) => { setTitle(event.target.value); setTitleEdited(true) }} required />
+                  <input className="input" value={displayedTitle} onChange={(event) => {
+                    setCreatedHike(null)
+                    setTitle(event.target.value)
+                    setTitleEdited(true)
+                  }} required />
                 </label>
                 <label>
                   <span className="field-label">Hiker name</span>
-                  <input className="input" value={hiker} onChange={(event) => setHiker(event.target.value)} required />
+                  <input className="input" value={hiker} onChange={(event) => {
+                    setCreatedHike(null)
+                    setHiker(event.target.value)
+                  }} required />
                 </label>
                 <p className="muted small">Past pace helps with timing; it cannot predict the weather or your conditions on the day.</p>
                 <div className="form-actions"><button className="button" type="submit">Create plan <span aria-hidden="true">→</span></button></div>

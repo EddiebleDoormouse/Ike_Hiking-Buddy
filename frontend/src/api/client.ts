@@ -287,7 +287,13 @@ export async function search(q: string, hikeId?: string): Promise<SearchResult[]
       .filter((media) => !hikeId || media.hike_id === hikeId)
       .map((media) => {
         const hike = mockState.hikes.find((item) => item.id === media.hike_id)
-        const sighting = mockState.sightings.find((item) => item.media_id === media.id) ?? null
+        const sightings = mockState.sightings.filter((item) => item.media_id === media.id)
+        const sighting = sightings.find((item) => {
+          const chosen = item.verification.chosen
+          const chosenName = `${chosen?.common_name ?? ''} ${chosen?.scientific_name ?? ''}`
+            .toLowerCase()
+          return words.some((word) => chosenName.includes(word))
+        }) ?? sightings[0] ?? null
         return { media, hike_title: hike?.title ?? 'A hike', sighting, score: 0 }
       })
       .map((result) => ({

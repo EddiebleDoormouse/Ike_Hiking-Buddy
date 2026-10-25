@@ -208,6 +208,6 @@ h3 { font-size: 15px; margin-bottom: 9px; color: #2b4034; }
   .search-bar .button { min-height: 40px; padding: 0 13px; }
   .search-bar .input { padding-left: 10px; font-size: 13px; }
   .species-list { grid-template-columns: 1fr 1fr; }
-  .tab-row { overflow-x: hidden; }
+  .tab-row { overflow-x: auto; }
   .tab { padding: 12px 10px; font-size: 12px; }
 }
