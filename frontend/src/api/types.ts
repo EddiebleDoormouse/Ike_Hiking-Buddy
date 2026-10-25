@@ -31,14 +31,14 @@ export type SpecialistResult = {
   top_common_name: string | null
   top_score: number
   alternatives: { name: string; common_name: string | null; score: number }[]
-  gbif_key: string | null
+  gbif_key: number | null
 }
 
 export type Verification = {
   status: 'confirmed' | 'plausible' | 'unsure' | 'not_applicable'
   chosen: Candidate | null
   gbif_nearby_count: number | null
-  gbif_key: string | null
+  gbif_key: number | null
   specialist: SpecialistResult | null
   specialist_agrees: 'species' | 'genus' | 'no' | null
   reasons: string[]
