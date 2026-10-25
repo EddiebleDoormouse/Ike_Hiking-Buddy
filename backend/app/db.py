@@ -1,5 +1,7 @@
 """Lazy MongoDB and GridFS access."""
 
+import threading
+
 from gridfs import GridFSBucket
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -7,6 +9,7 @@ from pymongo.database import Database
 from app.config import settings
 
 _client: MongoClient | None = None
+_client_lock = threading.Lock()
 
 
 def get_client() -> MongoClient:
@@ -15,11 +18,22 @@ def get_client() -> MongoClient:
     if not settings.MONGODB_URI:
         raise RuntimeError("MONGODB_URI is not set")
     if _client is None:
-        _client = MongoClient(
-            settings.MONGODB_URI,
-            serverSelectionTimeoutMS=2000,
-        )
+        with _client_lock:
+            if _client is None:
+                _client = MongoClient(
+                    settings.MONGODB_URI,
+                    serverSelectionTimeoutMS=2000,
+                )
     return _client
+
+
+def close_client() -> None:
+    """Close the cached MongoDB client and clear the cache."""
+    global _client
+    with _client_lock:
+        if _client is not None:
+            _client.close()
+            _client = None
 
 
 def get_db() -> Database:

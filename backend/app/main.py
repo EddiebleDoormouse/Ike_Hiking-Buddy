@@ -1,5 +1,8 @@
 """FastAPI application entry point."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,7 +11,16 @@ from app.config import settings
 from app.models import Health
 from app.routers import hikes, media, plan, recap, search, tracks
 
-app = FastAPI(title="Hiking Buddy API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Close shared resources when FastAPI shuts down."""
+    # FastAPI invokes this lifespan hook during application shutdown.
+    yield
+    db.close_client()
+
+
+app = FastAPI(title="Hiking Buddy API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list(),
