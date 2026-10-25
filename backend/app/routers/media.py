@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import unquote
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -152,6 +153,12 @@ def _stream_chunks(stream: Any) -> Iterator[bytes]:
         stream.close()
 
 
+def _safe_filename(name: str) -> str:
+    """Remove path components and header-sensitive characters from a filename."""
+    filename = Path(unquote(name).replace("\\", "/")).name
+    return filename.replace('"', "").replace("\r", "").replace("\n", "")
+
+
 @router.post(
     "/hikes/{hike_id}/media",
     response_model=UploadMediaResponse,
@@ -215,6 +222,7 @@ def upload_media(
 
     display = None
     thumb = None
+    safe_original = None
     analysis: MediaAnalysis | None = None
     caption = note_text if selected_kind == "note" else None
     tags: list[str] = []
@@ -223,6 +231,7 @@ def upload_media(
         try:
             display = to_display_jpeg(data, filename)
             thumb = thumbnail(data, 400)
+            safe_original = to_display_jpeg(data, filename, max_px=100_000)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
@@ -256,6 +265,7 @@ def upload_media(
     original_file_id = None
     display_file_id = None
     thumb_file_id = None
+    safe_original_file_id = None
     now = datetime.now(timezone.utc)
     media_document = {
         "hike_id": hike_oid,
@@ -265,6 +275,7 @@ def upload_media(
         "original_file_id": original_file_id,
         "display_file_id": display_file_id,
         "thumb_file_id": thumb_file_id,
+        "safe_original_file_id": safe_original_file_id,
         "taken_at": None,
         "location": None,
         "location_source": None,
@@ -281,7 +292,11 @@ def upload_media(
         if file is not None:
             original_file_id = _upload_file(files, filename, data, mime)
             uploaded_file_ids.append(original_file_id)
-            if display is not None and thumb is not None:
+            if (
+                display is not None
+                and thumb is not None
+                and safe_original is not None
+            ):
                 stem = Path(filename).stem or "image"
                 display_file_id = _upload_file(
                     files,
@@ -297,9 +312,17 @@ def upload_media(
                     "image/jpeg",
                 )
                 uploaded_file_ids.append(thumb_file_id)
+                safe_original_file_id = _upload_file(
+                    files,
+                    f"{stem}_original.jpg",
+                    safe_original,
+                    "image/jpeg",
+                )
+                uploaded_file_ids.append(safe_original_file_id)
             media_document["original_file_id"] = original_file_id
             media_document["display_file_id"] = display_file_id
             media_document["thumb_file_id"] = thumb_file_id
+            media_document["safe_original_file_id"] = safe_original_file_id
 
         media_result = db.media.insert_one(media_document)
         media_id = media_result.inserted_id
@@ -378,7 +401,7 @@ def get_media_file(
     db: Database = Depends(get_db),
     files: GridFSBucket = Depends(get_files),
 ) -> Response:
-    """Stream media; re-encode photo originals to strip EXIF GPS before serving."""
+    """Stream photos from metadata-free JPEGs, re-encoding legacy originals."""
     media_oid = _object_id(media_id)
     document = db.media.find_one({"_id": media_oid})
     if document is None:
@@ -386,11 +409,21 @@ def get_media_file(
 
     selected_id = None
     is_jpeg_variant = False
-    if document["kind"] == "photo" and variant in ("display", "thumb"):
+    is_safe_photo_original = False
+    is_legacy_photo_original = False
+    is_photo = document["kind"] == "photo"
+    if is_photo and variant in ("display", "thumb"):
         selected_id = document.get(f"{variant}_file_id")
         is_jpeg_variant = selected_id is not None
     if selected_id is None:
-        selected_id = document.get("original_file_id")
+        if is_photo:
+            selected_id = document.get("safe_original_file_id")
+            is_safe_photo_original = selected_id is not None
+            if selected_id is None:
+                selected_id = document.get("original_file_id")
+                is_legacy_photo_original = selected_id is not None
+        else:
+            selected_id = document.get("original_file_id")
     if selected_id is None:
         raise HTTPException(status_code=404, detail="This item has no file")
 
@@ -399,11 +432,17 @@ def get_media_file(
     except NoFile as exc:
         raise HTTPException(status_code=404, detail="Media file not found") from exc
 
-    is_photo_original = (
-        document["kind"] == "photo"
-        and selected_id == document.get("original_file_id")
-    )
-    if is_photo_original:
+    if is_safe_photo_original:
+        filename = _safe_filename(
+            f"{Path(document['filename']).stem or 'image'}.jpg"
+        )
+        return StreamingResponse(
+            _stream_chunks(stream),
+            media_type="image/jpeg",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+
+    if is_legacy_photo_original:
         try:
             raw = stream.read()
         finally:
@@ -411,9 +450,11 @@ def get_media_file(
         safe_image = to_display_jpeg(
             raw,
             document["filename"],
-            max_px=100_000,
+            max_px=4096,
         )
-        filename = f"{Path(document['filename']).stem or 'image'}.jpg"
+        filename = _safe_filename(
+            f"{Path(document['filename']).stem or 'image'}.jpg"
+        )
         return Response(
             content=safe_image,
             media_type="image/jpeg",
@@ -426,7 +467,7 @@ def get_media_file(
     else:
         media_type = document["mime"]
         filename = document["filename"]
-    filename = Path(filename.replace("\\", "/")).name.replace('"', "")
+    filename = _safe_filename(filename)
     return StreamingResponse(
         _stream_chunks(stream),
         media_type=media_type,

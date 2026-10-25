@@ -183,6 +183,7 @@ class FakeBucket:
     def __init__(self):
         self.files = {}
         self.last_download = None
+        self.last_download_id = None
 
     def upload_from_stream(self, filename, data, metadata=None):
         file_id = ObjectId()
@@ -199,6 +200,7 @@ class FakeBucket:
     def open_download_stream(self, file_id):
         if file_id not in self.files:
             raise NoFile(f"No file with id {file_id}")
+        self.last_download_id = file_id
         self.last_download = FakeDownload(self.files[file_id])
         return self.last_download
 
@@ -327,7 +329,7 @@ def test_photo_upload_creates_display_thumb_and_unsure_sighting(
     assert media["caption"] == "A small bird in a green hedgerow."
     assert media["tags"] == ["bird", "hedgerow"]
     assert media["text"] == "by the stile"
-    assert len(fake_bucket.files) == 3
+    assert len(fake_bucket.files) == 4
     sighting = payload["sighting"]
     assert sighting["verification"]["status"] == "unsure"
     assert sighting["verification"]["reasons"] == ["Not verified yet"]
@@ -366,7 +368,7 @@ def test_heic_upload_with_octet_stream_is_inferred_as_photo(
     assert response.status_code == 201
     assert response.json()["media"]["kind"] == "photo"
     assert response.json()["media"]["mime"] == "image/heic"
-    assert len(fake_bucket.files) == 3
+    assert len(fake_bucket.files) == 4
     display_id = ObjectId(response.json()["media"]["display_file_id"])
     with Image.open(BytesIO(fake_bucket.files[display_id]["data"])) as image:
         assert image.format == "JPEG"
@@ -374,6 +376,7 @@ def test_heic_upload_with_octet_stream_is_inferred_as_photo(
 
 def test_original_photo_is_served_without_exif_gps(
     client,
+    fake_db,
     fake_bucket,
     monkeypatch,
 ):
@@ -390,16 +393,67 @@ def test_original_photo_is_served_without_exif_gps(
     assert upload.status_code == 201
     media = upload.json()["media"]
     original_file_id = ObjectId(media["original_file_id"])
+    safe_original_file_id = fake_db.media.documents[0]["safe_original_file_id"]
     assert fake_bucket.files[original_file_id]["data"] == original
 
     response = client.get(f"/media/{media['id']}/file?variant=original")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
+    assert fake_bucket.last_download_id == safe_original_file_id
+    assert fake_bucket.last_download.closed
     with Image.open(BytesIO(response.content)) as image:
         assert image.size == (1200, 800)
         exif = image.getexif()
         assert not exif or 0x8825 not in exif
+
+
+def test_legacy_photo_original_is_reencoded_without_gps(
+    client,
+    fake_db,
+    fake_bucket,
+    monkeypatch,
+):
+    hike_id = create_hike(client).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+    original = make_gps_jpeg((320, 240))
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ("legacy.jpg", original, "image/jpeg")},
+    )
+    assert upload.status_code == 201
+    media = upload.json()["media"]
+    legacy_document = fake_db.media.documents[0]
+    safe_original_id = legacy_document.pop("safe_original_file_id")
+    fake_bucket.delete(safe_original_id)
+
+    response = client.get(f"/media/{media['id']}/file?variant=original")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert fake_bucket.last_download.closed
+    with Image.open(BytesIO(response.content)) as image:
+        assert image.format == "JPEG"
+        assert max(image.size) <= 4096
+        exif = image.getexif()
+        assert not exif or 0x8825 not in exif
+
+
+def test_original_photo_filename_is_sanitized(client, monkeypatch):
+    hike_id = create_hike(client).json()["id"]
+    monkeypatch.setattr(gemini, "analyze_media", Mock(return_value=sample_analysis()))
+    upload = client.post(
+        f"/hikes/{hike_id}/media",
+        files={"file": ('a"b.jpg', make_jpeg((80, 60)), "image/jpeg")},
+    )
+    assert upload.status_code == 201
+
+    response = client.get(
+        f"/media/{upload.json()['media']['id']}/file?variant=original"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'inline; filename="ab.jpg"'
 
 
 def test_landscape_analysis_does_not_create_sighting(
@@ -720,6 +774,7 @@ def test_mongodb_photo_upload_detail_and_file_variants(monkeypatch):
                     "original_file_id",
                     "display_file_id",
                     "thumb_file_id",
+                    "safe_original_file_id",
                 ):
                     file_id = media_document.get(field)
                     if file_id is not None:
