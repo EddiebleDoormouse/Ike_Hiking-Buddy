@@ -466,7 +466,7 @@ def test_hazards_from_interaction_keeps_only_deduplicated_http_citations():
     assert hazards[1].source_url == "https://example.org/fallback"
 
 
-def test_research_hazards_uses_search_and_low_thinking(monkeypatch: pytest.MonkeyPatch):
+def test_research_hazards_uses_search_and_high_thinking(monkeypatch: pytest.MonkeyPatch):
     """Hazard research sends only the approved Interactions API arguments."""
     captured = {}
 
@@ -481,7 +481,9 @@ def test_research_hazards_uses_search_and_low_thinking(monkeypatch: pytest.Monke
     assert gemini.research_hazards("Ridgeway", DAY, LAT, LON) == []
     assert captured["model"] == "gemini-4-argon"
     assert captured["tools"] == [{"type": "google_search"}]
-    assert captured["generation_config"] == {"thinking_level": "low"}
+    assert captured["generation_config"] == {
+        "thinking_level": gemini.HAZARD_THINKING_LEVEL
+    }
     assert "Saturday 31 October 2026" in captured["input"]
     forbidden_keys = {
         "temperature",
@@ -518,7 +520,9 @@ def test_draft_plan_uses_schema_and_parses_json(monkeypatch: pytest.MonkeyPatch)
     assert draft.start_time_local == time(9, 0)
     assert captured["response_format"]["schema"] == PlanDraft.model_json_schema()
     assert captured["response_format"]["mime_type"] == "application/json"
-    assert captured["generation_config"] == {"thinking_level": "medium"}
+    assert captured["generation_config"] == {
+        "thinking_level": gemini.DRAFT_THINKING_LEVEL
+    }
     assert captured["model"] == "gemini-4-argon"
 
 

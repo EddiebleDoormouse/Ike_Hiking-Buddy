@@ -9,8 +9,8 @@ from pydantic import ValidationError
 from app.services.planning import Hazard, PlanDraft, has_source_url
 
 PLANNER_MODEL = "gemini-4-argon"
-HAZARD_THINKING_LEVEL = "low"
-DRAFT_THINKING_LEVEL = "medium"
+HAZARD_THINKING_LEVEL = "high"
+DRAFT_THINKING_LEVEL = "high"
 
 PLANNER_SYSTEM = """You are Hiking Buddy, a careful UK hiking planner. You write a suggested plan, not a guarantee: always tell the hiker to check conditions before they go.
 The hiker is less experienced, so explain choices simply and favour safe, conservative options.
