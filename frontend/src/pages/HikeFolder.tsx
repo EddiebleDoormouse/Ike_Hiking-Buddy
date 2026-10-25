@@ -3,10 +3,13 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   getHike,
   listHikes,
+  mediaPlayUrl,
   mediaUrl,
   planHike,
   recap as createRecap,
   uploadMedia,
+  uploadTrack,
+  type UploadProgress,
 } from '../api/client'
 import type {
   HikeCard,
@@ -38,9 +41,11 @@ function HikeFolder() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null)
   const [uploadError, setUploadError] = useState('')
   const [uploadResult, setUploadResult] = useState<UploadMediaResponse | null>(null)
+  const [trackUploading, setTrackUploading] = useState(false)
+  const [trackError, setTrackError] = useState('')
   const [planning, setPlanning] = useState(false)
   const [planError, setPlanError] = useState('')
   const [recapping, setRecapping] = useState(false)
@@ -86,7 +91,7 @@ function HikeFolder() {
     event.target.value = ''
     if (!file || !hike) return
     setUploading(true)
-    setUploadProgress(0)
+    setUploadProgress(null)
     setUploadError('')
     try {
       const result = await uploadMedia(hike.id, file, setUploadProgress)
@@ -116,6 +121,26 @@ function HikeFolder() {
       setPlanError(planFailure instanceof Error ? planFailure.message : 'Could not create the plan.')
     } finally {
       setPlanning(false)
+    }
+  }
+
+  /** Upload a GPX/FIT track and merge the returned route + stats into the open hike folder. */
+  async function onUploadTrack(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !hike) return
+    setTrackUploading(true)
+    setTrackError('')
+    try {
+      const result = await uploadTrack(hike.id, file)
+      setDetail((current) => current ? {
+        ...current,
+        hike: { ...current.hike, route: result.route, stats: result.stats },
+      } : current)
+    } catch (trackFailure) {
+      setTrackError(trackFailure instanceof Error ? trackFailure.message : 'Could not upload this track.')
+    } finally {
+      setTrackUploading(false)
     }
   }
 
@@ -175,7 +200,14 @@ function HikeFolder() {
           </button>
         ))}
       </nav>
-      {activeTab === 'overview' && <Overview detail={detail} />}
+      {activeTab === 'overview' && (
+        <Overview
+          detail={detail}
+          onUploadTrack={onUploadTrack}
+          trackError={trackError}
+          trackUploading={trackUploading}
+        />
+      )}
       {activeTab === 'media' && (
         <MediaSection
           detail={detail}
@@ -209,7 +241,17 @@ function HikeFolder() {
   )
 }
 
-function Overview({ detail }: { detail: HikeDetail }) {
+function Overview({
+  detail,
+  onUploadTrack,
+  trackUploading,
+  trackError,
+}: {
+  detail: HikeDetail
+  onUploadTrack: (event: ChangeEvent<HTMLInputElement>) => void
+  trackUploading: boolean
+  trackError: string
+}) {
   const { hike, sightings, media } = detail
   const stats = hike.stats
   const metrics: { label: string; value: string | null }[] = [
@@ -242,10 +284,23 @@ function Overview({ detail }: { detail: HikeDetail }) {
         <div className="map-placeholder">No track statistics yet. Add a GPX or FIT track to see distance, time and elevation.</div>
       )}
       <section className="section">
-        <div className="section-header"><h2>Route and sightings</h2></div>
+        <div className="section-header">
+          <h2>Route and sightings</h2>
+          <label className="button-quiet small" style={{ cursor: 'pointer' }}>
+            {trackUploading ? 'Uploading…' : (hike.route ? 'Replace track (GPX/FIT)' : 'Add track (GPX/FIT)')}
+            <input
+              accept=".gpx,.fit,.fit.gz"
+              hidden
+              onChange={onUploadTrack}
+              type="file"
+              disabled={trackUploading}
+            />
+          </label>
+        </div>
+        {trackError && <div style={{ marginBottom: 14 }}><ErrorBox message={trackError} /></div>}
         {hasMapData
           ? <MapView route={hike.route} sightings={sightings} />
-          : <div className="map-placeholder"><div><strong>No track yet</strong><br />Add a route to place this hike on the map.</div></div>}
+          : <div className="map-placeholder"><div><strong>No track yet</strong><br />Add a GPX or FIT route to place this hike on the map.</div></div>}
       </section>
       {notes.length > 0 && (
         <section className="section">
@@ -270,7 +325,7 @@ function MediaSection({
   detail: HikeDetail
   onUpload: (event: ChangeEvent<HTMLInputElement>) => void
   uploading: boolean
-  uploadProgress: number
+  uploadProgress: UploadProgress | null
   uploadError: string
   uploadResult: UploadMediaResponse | null
 }) {
@@ -295,8 +350,15 @@ function MediaSection({
       </div>
       {uploading && (
         <Panel className="panel-pad" style={{ marginBottom: 16 }}>
-          <strong className="small">Uploading your file… {uploadProgress}%</strong>
-          <div className="upload-progress"><div style={{ width: `${uploadProgress}%` }} /></div>
+          <strong className="small">
+            {uploadProgress?.stage === 'analysing'
+              ? 'Uploaded — Gemini is analysing your file…'
+              : `Uploading your file… ${uploadProgress?.percent ?? 0}%`}
+          </strong>
+          <div className="upload-progress"><div style={{ width: `${uploadProgress?.percent ?? 0}%` }} /></div>
+          {uploadProgress?.stage === 'analysing' && (
+            <p className="muted small" style={{ margin: '8px 0 0' }}>Captioning and suggesting identifications can take a few seconds.</p>
+          )}
         </Panel>
       )}
       {uploadError && <div style={{ marginBottom: 16 }}><ErrorBox message={uploadError} /></div>}
@@ -313,8 +375,8 @@ function MediaSection({
             {audio.map((item) => (
               <Panel className="audio-card" key={item.id}>
                 <h3>{item.caption || item.filename}</h3>
-                <audio controls preload="none" src={item.display_file_id ? mediaUrl(item.id) : undefined} />
-                {!item.display_file_id && <p className="muted small">Audio preview isn’t available in this demo.</p>}
+                <audio controls preload="none" src={mediaPlayUrl(item)} />
+                {!mediaPlayUrl(item) && <p className="muted small">Audio preview isn’t available in this demo.</p>}
                 <p className="muted small">{formatDate(item.taken_at ?? item.created_at)}</p>
               </Panel>
             ))}
@@ -549,7 +611,14 @@ function RecapSection({
   error: string
   onGenerate: () => void
 }) {
-  if (recapping) return <StepLoader label="Gathering the hike folder" />
+  if (recapping) {
+    return (
+      <StepLoader
+        label="Gathering the hike folder"
+        steps={['Collecting stats and media…', 'Choosing highlights…', 'Writing your recap…']}
+      />
+    )
+  }
   if (recap) {
     return (
       <Panel className="panel-pad">

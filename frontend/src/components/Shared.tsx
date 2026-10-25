@@ -51,8 +51,9 @@ export function MarkdownBlock({ content }: { content: string }) {
   )
 }
 
-export function StepLoader({ label = 'Preparing your hike' }: { label?: string }) {
-  const steps = ['Fetching forecast…', 'Drafting plan…', 'Checking…', 'Revising…']
+const DEFAULT_STEPS = ['Fetching forecast…', 'Drafting plan…', 'Checking…', 'Revising…']
+
+export function StepLoader({ label = 'Preparing your hike', steps = DEFAULT_STEPS }: { label?: string; steps?: string[] }) {
   const [active, setActive] = useState(0)
   useEffect(() => {
     const timer = window.setInterval(() => setActive((step) => Math.min(step + 1, steps.length - 1)), 1800)

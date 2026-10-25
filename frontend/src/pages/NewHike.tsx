@@ -73,7 +73,12 @@ function NewHike() {
         })
         setCreatedHike(hike)
       }
-      await planHike(hike.id)
+      try {
+        await planHike(hike.id)
+      } catch {
+        // The toast already explains the failure; the hike folder's Plan tab
+        // offers a retry, so still open it.
+      }
       navigate(`/hikes/${hike.id}?tab=plan`)
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not create the plan.')
