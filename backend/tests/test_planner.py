@@ -189,6 +189,7 @@ def test_one_revision_emits_ordered_progress_events(
         "checks",
         "revise",
         "checks",
+        "done",
     ]
     expected_failed = [
         check["name"]
@@ -650,7 +651,7 @@ class FakeCollection:
             if document.get("hike_id") in candidates
         ]
 
-    def update_one(self, query: dict, update: dict) -> None:
+    def update_one(self, query: dict, update: dict) -> SimpleNamespace:
         self.update_calls.append((dict(query), dict(update)))
         target_id = query["_id"]
         document = next(
@@ -658,13 +659,16 @@ class FakeCollection:
             None,
         )
         if document is None:
-            return
+            return SimpleNamespace(matched_count=0)
         if (
             "plan_run_id" in query
             and document.get("plan_run_id") != query["plan_run_id"]
         ):
-            return
-        document.update(update["$set"])
+            return SimpleNamespace(matched_count=0)
+        document.update(update.get("$set", {}))
+        for key, value in update.get("$push", {}).items():
+            document.setdefault(key, []).append(value)
+        return SimpleNamespace(matched_count=1)
 
 
 class FakeDatabase:
@@ -715,7 +719,12 @@ def test_plan_router_saves_plan_with_real_planner_loop(
             }
         ],
     )
-    calls = patch_planner_calls(monkeypatch, make_forecast(), make_draft())
+    calls = patch_planner_calls(
+        monkeypatch,
+        make_forecast(),
+        make_draft(duration=1000),
+        [make_draft()],
+    )
 
     client = make_client(database)
     response = client.post("/hikes/hike-1/plan")
@@ -723,13 +732,27 @@ def test_plan_router_saves_plan_with_real_planner_loop(
     assert response.status_code == 200
     assert response.json()["final"]["est_duration_min"] == 209
     assert hike["plan"] == response.json()
+    assert response.json()["revisions"] == 1
     assert hike["plan_progress"]["stage"] == "done"
     assert hike["plan_progress"]["run_id"] == hike["plan_run_id"]
+    assert [event["stage"] for event in hike["plan_events"]] == [
+        "queued",
+        "forecast",
+        "hazards",
+        "draft",
+        "checks",
+        "revise",
+        "checks",
+        "done",
+    ]
     progress_response = client.get(
         "/hikes/hike-1/plan/progress"
     )
     assert progress_response.status_code == 200
-    assert progress_response.json() == hike["plan_progress"]
+    assert progress_response.json() == {
+        **hike["plan_progress"],
+        "events": hike["plan_events"],
+    }
     assert "Fox" in calls["draft"][0]
     queue_query, queue_update = database["hikes"].update_calls[0]
     run_id = queue_update["$set"]["plan_run_id"]
@@ -744,6 +767,7 @@ def test_plan_router_saves_plan_with_real_planner_loop(
     assert final_query == {"_id": "hike-1", "plan_run_id": run_id}
     assert final_update["$set"]["plan"] == response.json()
     assert final_update["$set"]["plan_progress"]["stage"] == "done"
+    assert final_update["$push"]["plan_events"]["stage"] == "done"
 
 
 def test_superseded_plan_does_not_save_progress_or_plan(
@@ -773,7 +797,8 @@ def test_superseded_plan_does_not_save_progress_or_plan(
 
     response = make_client(database).post("/hikes/hike-1/plan")
 
-    assert response.status_code == 200
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A newer plan request replaced this one."
     assert "plan" not in hike
     assert hike["plan_run_id"] == "newer-run"
     assert hike["plan_progress"]["stage"] == "checks"
@@ -818,6 +843,10 @@ def test_superseded_plan_error_does_not_overwrite_progress(
     assert response.status_code == 502
     assert hike["plan_run_id"] == "newer-run"
     assert hike["plan_progress"]["stage"] == "draft"
+    assert [event["stage"] for event in hike["plan_events"]] == [
+        "queued",
+        "draft",
+    ]
     original_run_id = hike["plan_progress"]["run_id"]
     assert original_run_id != "newer-run"
     error_query, error_update = next(
@@ -836,7 +865,11 @@ def test_plan_progress_is_idle_before_planning():
     )
 
     assert response.status_code == 200
-    assert response.json() == {"stage": "idle", "message": "Not started"}
+    assert response.json() == {
+        "stage": "idle",
+        "message": "Not started",
+        "events": [],
+    }
 
 
 def test_plan_progress_returns_404_for_unknown_hike():
@@ -861,12 +894,20 @@ def test_plan_router_returns_404_for_missing_based_on_hike():
     """A referenced prior hike must exist before planning begins."""
     hike = make_hike()
     hike["based_on_hike_id"] = "missing-base"
-    response = make_client(FakeDatabase([hike], [])).post(
+    client = make_client(FakeDatabase([hike], []))
+    response = client.post(
         "/hikes/hike-1/plan"
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Based-on hike not found"
+    assert "plan_progress" not in hike
+    progress_response = client.get("/hikes/hike-1/plan/progress")
+    assert progress_response.json() == {
+        "stage": "idle",
+        "message": "Not started",
+        "events": [],
+    }
 
 
 def test_plan_router_returns_400_for_missing_start_and_route_stats():

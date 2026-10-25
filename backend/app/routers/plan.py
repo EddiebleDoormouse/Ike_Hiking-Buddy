@@ -41,7 +41,10 @@ def _save_progress(
     try:
         db["hikes"].update_one(
             {"_id": hike_id, "plan_run_id": run_id},
-            {"$set": {"plan_progress": event}},
+            {
+                "$set": {"plan_progress": event},
+                "$push": {"plan_events": event},
+            },
         )
     except Exception:
         logger.exception("failed to save plan progress")
@@ -74,26 +77,6 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         raise HTTPException(status_code=404, detail="Hike not found")
 
     run_id = uuid4().hex
-    started = perf_counter()
-    queued_progress = {
-        "stage": "queued",
-        "message": "Starting",
-        "revision": 0,
-        "failed": [],
-        "elapsed_ms": 0,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "run_id": run_id,
-    }
-    db["hikes"].update_one(
-        {"_id": hike["_id"]},
-        {
-            "$set": {
-                "plan_run_id": run_id,
-                "plan_progress": queued_progress,
-            }
-        },
-    )
-
     based_on = None
     based_on_id = hike.get("based_on_hike_id")
     if based_on_id is not None:
@@ -114,9 +97,32 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         else []
     )
 
+    started = perf_counter()
+    queued_progress = {
+        "stage": "queued",
+        "message": "Starting",
+        "revision": 0,
+        "failed": [],
+        "elapsed_ms": 0,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+    }
+    db["hikes"].update_one(
+        {"_id": hike["_id"]},
+        {
+            "$set": {
+                "plan_run_id": run_id,
+                "plan_progress": queued_progress,
+                "plan_events": [queued_progress],
+            }
+        },
+    )
+
     latest_progress: dict[str, Any] = {"revision": 0, "failed": []}
 
     def save_progress(event: dict) -> None:
+        if event["stage"] == "done":
+            return
         event["run_id"] = run_id
         latest_progress.update(event)
         _save_progress(db, hike["_id"], run_id, event)
@@ -163,15 +169,21 @@ def create_plan(hike_id: str, db: Any = Depends(get_database)) -> dict:
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
     }
-    db["hikes"].update_one(
+    result = db["hikes"].update_one(
         {"_id": hike["_id"], "plan_run_id": run_id},
         {
             "$set": {
                 "plan": plan,
                 "plan_progress": done_progress,
-            }
+            },
+            "$push": {"plan_events": done_progress},
         },
     )
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="A newer plan request replaced this one.",
+        )
     return plan
 
 
@@ -181,7 +193,8 @@ def get_plan_progress(hike_id: str, db: Any = Depends(get_database)) -> dict:
     hike = find_hike(db, hike_id)
     if hike is None:
         raise HTTPException(status_code=404, detail="Hike not found")
-    return hike.get("plan_progress") or {
+    latest_event = hike.get("plan_progress") or {
         "stage": "idle",
         "message": "Not started",
     }
+    return {**latest_event, "events": hike.get("plan_events", [])}

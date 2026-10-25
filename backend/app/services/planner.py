@@ -549,4 +549,5 @@ def plan_hike(
         "timings_ms": timings_ms,
         "created_at": created_at,
     }
+    _emit(on_progress, "done", "Plan ready", revisions, total_started)
     return result
