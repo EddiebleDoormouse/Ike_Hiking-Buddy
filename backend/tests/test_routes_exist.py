@@ -10,33 +10,6 @@ client = TestClient(app)
 ROUTES = [
     (
         "POST",
-        "/hikes",
-        {
-            "json": {
-                "title": "Morning walk",
-                "trail_name": "Example Trail",
-                "hiker": "Edouard",
-                "date": "2026-10-24",
-                "status": "completed",
-            }
-        },
-    ),
-    ("GET", "/hikes", {}),
-    ("GET", "/hikes/hike-1", {}),
-    (
-        "POST",
-        "/hikes/hike-1/media",
-        {
-            "files": {
-                "file": ("sample.jpg", b"test", "image/jpeg"),
-                "kind": (None, "photo"),
-                "text": (None, "A sample note"),
-            }
-        },
-    ),
-    ("GET", "/media/media-1/file?variant=display", {}),
-    (
-        "POST",
         "/hikes/hike-1/track",
         {"files": {"file": ("sample.gpx", b"<gpx />", "application/gpx+xml")}},
     ),
@@ -64,3 +37,30 @@ def test_health_route_is_registered():
     response = client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_dv_p1_routes_are_registered():
+    routes = {
+        (method, route.path)
+        for route in app.routes
+        if hasattr(route, "methods")
+        for method in route.methods
+    }
+    # FastAPI 0.162 keeps included routers lazy; inspect their effective routes.
+    for route in app.routes:
+        if hasattr(route, "effective_route_contexts"):
+            routes.update(
+                (method, context.path_format)
+                for context in route.effective_route_contexts()
+                for method in context.original_route.methods
+            )
+    expected = {
+        ("POST", "/hikes"),
+        ("GET", "/hikes"),
+        ("GET", "/hikes/{hike_id}"),
+        ("POST", "/hikes/{hike_id}/media"),
+        ("GET", "/media/{media_id}"),
+        ("GET", "/media/{media_id}/file"),
+    }
+
+    assert expected <= routes
