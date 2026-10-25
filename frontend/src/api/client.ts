@@ -50,7 +50,9 @@ function toCard(hike: Hike): HikeCard {
     distance_km: hike.stats?.distance_km ?? null,
     ascent_m: hike.stats?.ascent_m ?? null,
     species_count: mockState.sightings.filter(
-      (sighting) => sighting.hike_id === hike.id && sighting.verification.chosen,
+      (sighting) => sighting.hike_id === hike.id
+        && sighting.verification.status !== 'not_applicable'
+        && sighting.verification.chosen !== null,
     ).length,
   }
 }

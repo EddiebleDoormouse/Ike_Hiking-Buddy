@@ -282,7 +282,7 @@ function MediaSection({
       <div className="section-header">
         <div><h2>Memories from the trail</h2><p className="muted small">Photos, recordings and notes, together.</p></div>
         <label className="button button-small">
-          {uploading ? 'Uploading…' : '＋ Add media'}
+          {uploading ? 'Uploading…' : '+ Add media'}
           <input
             accept="image/*,audio/*"
             capture="environment"

@@ -34,7 +34,7 @@ button { cursor: pointer; }
   position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(16px);
 }
 .brand { display: inline-flex; gap: 10px; align-items: center; font-size: 17px; font-weight: 700; letter-spacing: -.03em; }
-.brand-mark { width: 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; background: #1f4d3a; color: #fff; font-size: 23px; line-height: 1; transform: rotate(-20deg); }
+.brand-mark { width: 31px; height: 31px; flex: none; border-radius: 10px; display: grid; place-items: center; background: #1f4d3a; color: #fff; }
 .topnav { display: flex; align-items: center; gap: 22px; }
 .nav-link { color: #6d746e; font-size: 14px; font-weight: 600; }
 .nav-link.active, .nav-link:hover { color: #1f4d3a; }
@@ -84,7 +84,7 @@ h3 { font-size: 15px; margin-bottom: 9px; color: #2b4034; }
 .card-title-row { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
 .card-title { font-size: 19px; letter-spacing: -.035em; line-height: 1.2; margin-bottom: 5px; }
 .trail-name { color: #818780; font-size: 12px; margin: 0 0 15px; }
-.badge { display: inline-flex; align-items: center; border-radius: 999px; font-weight: 750; text-transform: capitalize; white-space: nowrap; font-size: 11px; padding: 6px 10px; }
+.badge { display: inline-flex; align-items: center; border-radius: 999px; font-weight: 750; white-space: nowrap; font-size: 11px; padding: 6px 10px; }
 .badge-planned { color: #875a1b; background: #f7edd8; }
 .badge-completed { color: #356046; background: #e8f1e8; }
 .badge-confirmed { color: #316344; background: #e6f3e8; }
@@ -130,7 +130,7 @@ h3 { font-size: 15px; margin-bottom: 9px; color: #2b4034; }
 .sighting-title-line { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; }
 .sighting-title-line h3 { font-size: 18px; margin: 0 0 3px; }
 .science { color: #7b827b; font-size: 12px; font-style: italic; }
-.why-list { padding-left: 19px; margin: 12px 0 0; color: #626c64; font-size: 12px; line-height: 1.6; }
+.why-list { list-style: disc; padding-left: 19px; margin: 12px 0 0; color: #626c64; font-size: 12px; line-height: 1.6; }
 .warning-box { background: #fbf2e0; color: #77521b; border: 1px solid #eddfc0; border-radius: 12px; padding: 12px 14px; font-size: 12px; line-height: 1.5; margin-top: 13px; }
 .candidate-list { color: #727c73; font-size: 12px; margin: 9px 0 0; line-height: 1.6; }
 .confidence-line, .specialist-line, .gbif-line { color: #656f67; font-size: 12px; margin: 8px 0 0; }
@@ -142,7 +142,8 @@ h3 { font-size: 15px; margin-bottom: 9px; color: #2b4034; }
 .markdown { color: #47584b; line-height: 1.7; font-size: 14px; }
 .markdown h2 { margin-top: 5px; }
 .markdown p { margin-bottom: 12px; }
-.markdown ul { padding-left: 21px; }
+.markdown ul { list-style: disc; padding-left: 21px; }
+.markdown ol { list-style: decimal; padding-left: 21px; }
 .check-list { display: grid; gap: 9px; }
 .check-item { display: flex; gap: 11px; align-items: flex-start; border-radius: 12px; background: #f4f6f1; padding: 12px; }
 .check-item.failed { color: #8b362f; background: #fbefed; }
@@ -207,4 +208,6 @@ h3 { font-size: 15px; margin-bottom: 9px; color: #2b4034; }
   .search-bar .button { min-height: 40px; padding: 0 13px; }
   .search-bar .input { padding-left: 10px; font-size: 13px; }
   .species-list { grid-template-columns: 1fr 1fr; }
+  .tab-row { overflow-x: hidden; }
+  .tab { padding: 12px 10px; font-size: 12px; }
 }

@@ -48,7 +48,7 @@ function HikesGallery() {
           <h1>Every hike, in one place.</h1>
           <p className="subheading">Plans, photographs and little things you noticed along the way.</p>
         </div>
-        <Link className="button" to="/new">＋ Plan a hike</Link>
+        <Link className="button" to="/new">+ Plan a hike</Link>
       </div>
 
       <div className="gallery-toolbar">
@@ -73,7 +73,11 @@ function HikesGallery() {
       {loading && <SkeletonCards />}
       {!loading && !error && hikes.length === 0 && (
         <div className="empty-state">
-          <div className="empty-icon">⌁</div>
+          <div className="empty-icon" aria-hidden="true">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+              <path d="M3 19 9 8l4 7 3-5 5 9H3Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            </svg>
+          </div>
           <h2>Your next story starts outside.</h2>
           <p className="muted">Create a hike to keep its plan, track and memories together.</p>
           <Link to="/new" className="button">Plan your first hike</Link>
@@ -101,7 +105,9 @@ function HikesGallery() {
                   <span>◷ {formatDate(hike.date)}</span>
                   {hike.distance_km != null && <span>↔ {hike.distance_km.toFixed(1)} km</span>}
                   {hike.ascent_m != null && <span>↑ {Math.round(hike.ascent_m)} m</span>}
-                  <span>✳ {hike.species_count ?? 0} sightings</span>
+                  <span>
+                    ✳ {hike.species_count ? `${hike.species_count} species` : 'No species yet'}
+                  </span>
                 </div>
               </div>
             </Link>

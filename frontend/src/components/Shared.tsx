@@ -3,7 +3,9 @@ import ReactMarkdown from 'react-markdown'
 import type { Plan } from '../api/types'
 
 export function StatusBadge({ status }: { status: string }) {
-  const label = status === 'not_applicable' ? 'Not applicable' : status
+  const label = status === 'not_applicable'
+    ? 'Not applicable'
+    : status.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
   return <span className={`badge badge-${status}`}>{label}</span>
 }
 

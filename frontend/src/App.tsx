@@ -10,7 +10,11 @@ function App() {
       <div className="app-frame">
         <header className="topbar">
           <Link className="brand" to="/">
-            <span className="brand-mark" aria-hidden="true">⌁</span>
+            <span className="brand-mark" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M3 19 9 8l4 7 3-5 5 9H3Z" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              </svg>
+            </span>
             <span>Hiking Buddy</span>
           </Link>
           <nav className="topnav" aria-label="Main navigation">

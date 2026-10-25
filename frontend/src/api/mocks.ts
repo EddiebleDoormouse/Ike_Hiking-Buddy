@@ -200,24 +200,67 @@ const flyAgaric: Candidate = {
   confidence: 0.82,
   group: 'fungus',
 }
+const blusher: Candidate = {
+  common_name: 'Blusher',
+  scientific_name: 'Amanita rubescens',
+  confidence: 0.1,
+  group: 'fungus',
+}
+const pantherCap: Candidate = {
+  common_name: 'Panther cap',
+  scientific_name: 'Amanita pantherina',
+  confidence: 0.05,
+  group: 'fungus',
+}
 const fox: Candidate = {
   common_name: 'Red fox',
   scientific_name: 'Vulpes vulpes',
-  confidence: 0.68,
+  confidence: 0.86,
+  group: 'mammal',
+}
+const domesticDog: Candidate = {
+  common_name: 'Domestic dog',
+  scientific_name: 'Canis familiaris',
+  confidence: 0.07,
+  group: 'mammal',
+}
+const badger: Candidate = {
+  common_name: 'Badger',
+  scientific_name: 'Meles meles',
+  confidence: 0.03,
   group: 'mammal',
 }
 const redKite: Candidate = {
   common_name: 'Red kite',
   scientific_name: 'Milvus milvus',
-  confidence: 0.2,
+  confidence: 0.31,
   group: 'bird',
+}
+const kestrel: Candidate = {
+  common_name: 'Kestrel',
+  scientific_name: 'Falco tinnunculus',
+  confidence: 0.12,
+  group: 'bird',
+}
+const heather: Candidate = {
+  common_name: 'Heather / Ling',
+  scientific_name: 'Calluna vulgaris',
+  confidence: 0.78,
+  group: 'plant',
+}
+const bellHeather: Candidate = {
+  common_name: 'Bell heather',
+  scientific_name: 'Erica cinerea',
+  confidence: 0.15,
+  group: 'plant',
 }
 
 function makeSighting(
   id: string,
   hikeId: string,
   mediaId: string,
-  candidate: Candidate | null,
+  candidates: Candidate[],
+  chosen: Candidate | null,
   status: Sighting['verification']['status'],
   details: Partial<Sighting['verification']>,
   location: Sighting['location'],
@@ -227,12 +270,12 @@ function makeSighting(
     id,
     hike_id: hikeId,
     media_id: mediaId,
-    candidates: candidate ? [candidate, redKite] : [],
+    candidates,
     verification: {
       status,
-      chosen: candidate,
-      gbif_nearby_count: candidate ? 23 : null,
-      gbif_key: candidate ? '2434116' : null,
+      chosen,
+      gbif_nearby_count: chosen ? 23 : null,
+      gbif_key: chosen ? '2434116' : null,
       specialist: null,
       specialist_agrees: null,
       reasons: [],
@@ -308,8 +351,8 @@ export const mockMedia: MediaItem[] = [
     taken_at: '2026-09-19T11:30:00+01:00',
     location: { type: 'Point', coordinates: [-1.889, 53.383] },
     location_source: 'track',
-    caption: 'A buzzard-like silhouette over heather and gritstone',
-    tags: ['buzzard', 'bird', 'heather', 'gritstone', 'moorland'],
+    caption: 'Heather and ling beside a distant buzzard-like silhouette',
+    tags: ['heather', 'ling', 'Calluna vulgaris', 'buzzard', 'bird', 'moorland'],
     text: null,
     created_at: createdAt,
   },
@@ -354,28 +397,46 @@ export const mockSightings: Sighting[] = [
     'sighting-fox',
     'hike-ivinghoe',
     'media-fox',
+    [fox, domesticDog, badger],
     fox,
     'confirmed',
     {
       gbif_nearby_count: 18,
       gbif_key: '5219173',
-      specialist: {
-        source: 'plantnet',
-        top_name: 'Vulpes vulpes',
-        top_common_name: 'Red fox',
-        top_score: 0.71,
-        alternatives: [{ name: 'Vulpes vulpes', common_name: 'Red fox', score: 0.21 }],
-        gbif_key: '5219173',
-      },
-      specialist_agrees: 'species',
-      reasons: ['The leading candidate is a strong match at 68%.', 'GBIF has 18 nearby seasonal records.', 'Pl@ntNet independently agrees at species level.'],
+      specialist: null,
+      specialist_agrees: null,
+      reasons: ['The leading candidate is Red fox (Vulpes vulpes) at 86%.', 'GBIF has 18 nearby seasonal records.', 'The image and location support a fox identification, though they are not proof.'],
     },
     { type: 'Point', coordinates: [-0.616, 51.841] },
+  ),
+  makeSighting(
+    'sighting-heather',
+    'hike-kinder',
+    'media-heather',
+    [heather, bellHeather],
+    heather,
+    'confirmed',
+    {
+      gbif_nearby_count: 42,
+      gbif_key: '2689683',
+      specialist: {
+        source: 'plantnet',
+        top_name: 'Calluna vulgaris',
+        top_common_name: 'Heather / Ling',
+        top_score: 0.71,
+        alternatives: [{ name: 'Erica cinerea', common_name: 'Bell heather', score: 0.18 }],
+        gbif_key: '2689683',
+      },
+      specialist_agrees: 'species',
+      reasons: ['The leading candidate is Heather / Ling (Calluna vulgaris) at 78%.', 'Pl@ntNet independently identifies Calluna vulgaris at 71%.', 'GBIF has 42 nearby seasonal records; these provide context, not proof.'],
+    },
+    { type: 'Point', coordinates: [-1.889, 53.383] },
   ),
   makeSighting(
     'sighting-mushroom',
     'hike-ivinghoe',
     'media-mushroom',
+    [flyAgaric, blusher, pantherCap],
     flyAgaric,
     'plausible',
     {
@@ -399,6 +460,7 @@ export const mockSightings: Sighting[] = [
     'sighting-buzzard',
     'hike-kinder',
     'media-heather',
+    [buzzard, redKite, kestrel],
     buzzard,
     'unsure',
     {
@@ -414,6 +476,7 @@ export const mockSightings: Sighting[] = [
     'sighting-landscape',
     'hike-ivinghoe',
     'media-misty',
+    [],
     null,
     'not_applicable',
     {
