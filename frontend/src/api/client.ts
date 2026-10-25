@@ -176,7 +176,7 @@ export async function uploadMedia(
       status: 'plausible',
       chosen: candidate,
       gbif_nearby_count: 4,
-      gbif_key: '2480583',
+      gbif_key: 2480583,
       specialist: null,
       specialist_agrees: null,
       reasons: [
