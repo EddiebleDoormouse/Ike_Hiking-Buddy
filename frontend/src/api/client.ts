@@ -413,3 +413,9 @@ export function mediaUrl(
   }
   return `${API_URL}/media/${encodeURIComponent(id)}/file?variant=${variant}`
 }
+
+/** Playable URL for an audio/video item, or undefined when only an image placeholder exists (seeded mocks carry no bytes). */
+export function mediaPlayUrl(item: MediaItem): string | undefined {
+  if (USE_MOCKS) return item.original_file_id ? mockState.objectUrls.get(item.id) : undefined
+  return item.original_file_id ? mediaUrl(item.id) : undefined
+}

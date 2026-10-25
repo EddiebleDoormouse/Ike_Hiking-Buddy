@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   getHike,
   listHikes,
+  mediaPlayUrl,
   mediaUrl,
   planHike,
   recap as createRecap,
@@ -374,8 +375,8 @@ function MediaSection({
             {audio.map((item) => (
               <Panel className="audio-card" key={item.id}>
                 <h3>{item.caption || item.filename}</h3>
-                <audio controls preload="none" src={item.original_file_id ? mediaUrl(item.id) : undefined} />
-                {!item.original_file_id && <p className="muted small">Audio preview isn’t available in this demo.</p>}
+                <audio controls preload="none" src={mediaPlayUrl(item)} />
+                {!mediaPlayUrl(item) && <p className="muted small">Audio preview isn’t available in this demo.</p>}
                 <p className="muted small">{formatDate(item.taken_at ?? item.created_at)}</p>
               </Panel>
             ))}
