@@ -7,8 +7,11 @@
   "paths": {
     "/hikes": {
       "get": {
+        "tags": [
+          "hikes"
+        ],
         "summary": "List Hikes",
-        "description": "List hike cards.",
+        "description": "Return hike cards ordered from newest to oldest.",
         "operationId": "list_hikes_hikes_get",
         "responses": {
           "200": {
@@ -24,15 +27,15 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not implemented yet"
           }
         }
       },
       "post": {
+        "tags": [
+          "hikes"
+        ],
         "summary": "Create Hike",
-        "description": "Create a hike.",
+        "description": "Create a hike with empty route, stats, and plan fields.",
         "operationId": "create_hike_hikes_post",
         "requestBody": {
           "content": {
@@ -55,9 +58,6 @@
               }
             }
           },
-          "501": {
-            "description": "Not implemented yet"
-          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -73,8 +73,11 @@
     },
     "/hikes/{hike_id}": {
       "get": {
+        "tags": [
+          "hikes"
+        ],
         "summary": "Get Hike",
-        "description": "Return a hike and its associated media and sightings.",
+        "description": "Return one hike with its media and sightings.",
         "operationId": "get_hike_hikes__hike_id__get",
         "parameters": [
           {
@@ -98,9 +101,6 @@
               }
             }
           },
-          "501": {
-            "description": "Not implemented yet"
-          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -116,8 +116,11 @@
     },
     "/hikes/{hike_id}/media": {
       "post": {
+        "tags": [
+          "media"
+        ],
         "summary": "Upload Media",
-        "description": "Upload media to a hike.",
+        "description": "Upload a photo, audio clip, video, or note to a hike.",
         "operationId": "upload_media_hikes__hike_id__media_post",
         "parameters": [
           {
@@ -131,7 +134,6 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -151,8 +153,48 @@
               }
             }
           },
-          "501": {
-            "description": "Not implemented yet"
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media/{media_id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Get Media",
+        "description": "Return metadata for one media item.",
+        "operationId": "get_media_media__media_id__get",
+        "parameters": [
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Media Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItem"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -169,8 +211,11 @@
     },
     "/media/{media_id}/file": {
       "get": {
+        "tags": [
+          "media"
+        ],
         "summary": "Get Media File",
-        "description": "Stream a requested media-file variant.",
+        "description": "Stream photos from metadata-free JPEGs, re-encoding legacy originals.",
         "operationId": "get_media_file_media__media_id__file_get",
         "parameters": [
           {
@@ -188,9 +233,9 @@
             "required": false,
             "schema": {
               "enum": [
-                "original",
                 "display",
-                "thumb"
+                "thumb",
+                "original"
               ],
               "type": "string",
               "default": "display",
@@ -206,9 +251,6 @@
                 "schema": {}
               }
             }
-          },
-          "501": {
-            "description": "Not implemented yet"
           },
           "422": {
             "description": "Validation Error",
@@ -534,14 +576,27 @@
       "Body_upload_media_hikes__hike_id__media_post": {
         "properties": {
           "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "File"
           },
           "kind": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "photo",
+                  "audio",
+                  "video",
+                  "note"
+                ]
               },
               {
                 "type": "null"
@@ -562,9 +617,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "file"
-        ],
         "title": "Body_upload_media_hikes__hike_id__media_post"
       },
       "Body_upload_track_hikes__hike_id__track_post": {
