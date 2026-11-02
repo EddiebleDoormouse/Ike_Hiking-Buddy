@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic>=2
+pydantic-settings
+python-dotenv
+pymongo>=4.7
+google-genai>=2.3.0
+httpx
+gpxpy
+fitdecode
+pillow
+pillow-heif
+astral
+kindwise-api-client

@@ -81,7 +81,15 @@ function NewHike() {
         if (!mountedRef.current) return
         setCreatedHike(hike)
       }
-      await planHike(hike.id)
+      try {
+        await planHike(hike.id)
+      } catch {
+        // The toast already explains the failure; the hike folder's Plan tab
+        // offers a retry, so still open it.
+        if (!mountedRef.current) return
+        navigate(`/hikes/${hike.id}?tab=plan`)
+        return
+      }
       if (!mountedRef.current) return
       navigate(`/hikes/${hike.id}?tab=plan`)
     } catch (submitError) {
