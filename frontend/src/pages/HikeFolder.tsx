@@ -28,6 +28,7 @@ import {
   Panel,
   PlanSummary,
   StatusBadge,
+  PlanProgressLoader,
   StepLoader,
 } from '../components/Shared'
 
@@ -222,6 +223,7 @@ function HikeFolder() {
       {activeTab === 'plan' && hike.status === 'planned' && (
         <PlanSection
           error={planError}
+          hikeId={hike.id}
           kitState={kitState}
           onGenerate={() => void generatePlan()}
           onToggleKit={(item, checked) => setKitState((state) => ({ ...state, [item]: checked }))}
@@ -491,6 +493,7 @@ function SightingDetails({ sighting }: { sighting: Sighting }) {
 }
 
 function PlanSection({
+  hikeId,
   plan,
   planning,
   error,
@@ -498,6 +501,7 @@ function PlanSection({
   kitState,
   onToggleKit,
 }: {
+  hikeId: string
   plan: Plan | null | undefined
   planning: boolean
   error: string
@@ -505,7 +509,7 @@ function PlanSection({
   kitState: Record<string, boolean>
   onToggleKit: (item: string, checked: boolean) => void
 }) {
-  if (planning) return <StepLoader label="Putting your plan together" />
+  if (planning) return <PlanProgressLoader hikeId={hikeId} label="Putting your plan together" />
   if (!plan) {
     return (
       <Panel className="panel-pad">

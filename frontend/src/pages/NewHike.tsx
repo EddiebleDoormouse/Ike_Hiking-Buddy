@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createHike, listHikes, planHike } from '../api/client'
 import type { Hike, HikeCard } from '../api/types'
-import { ErrorBox, PageLoading, StepLoader } from '../components/Shared'
+import { ErrorBox, PageLoading, PlanProgressLoader } from '../components/Shared'
 
 function nextSaturday(): string {
   const date = new Date()
@@ -16,6 +16,7 @@ function nextSaturday(): string {
 
 function NewHike() {
   const navigate = useNavigate()
+  const mountedRef = useRef(true)
   const [hikes, setHikes] = useState<HikeCard[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [date, setDate] = useState(nextSaturday())
@@ -48,6 +49,12 @@ function NewHike() {
   }
 
   useEffect(() => { void loadHikes() }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   function retryLoad() {
     setLoadingHikes(true)
@@ -71,6 +78,7 @@ function NewHike() {
           status: 'planned',
           based_on_hike_id: selected.id,
         })
+        if (!mountedRef.current) return
         setCreatedHike(hike)
       }
       try {
@@ -78,12 +86,18 @@ function NewHike() {
       } catch {
         // The toast already explains the failure; the hike folder's Plan tab
         // offers a retry, so still open it.
+        if (!mountedRef.current) return
+        navigate(`/hikes/${hike.id}?tab=plan`)
+        return
       }
+      if (!mountedRef.current) return
       navigate(`/hikes/${hike.id}?tab=plan`)
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Could not create the plan.')
+      if (mountedRef.current) {
+        setError(submitError instanceof Error ? submitError.message : 'Could not create the plan.')
+      }
     } finally {
-      setSubmitting(false)
+      if (mountedRef.current) setSubmitting(false)
     }
   }
 
@@ -107,7 +121,7 @@ function NewHike() {
         </div>
       )}
       {submitting ? (
-        <div className="form-panel"><StepLoader label="Working on your plan" /></div>
+        <div className="form-panel"><PlanProgressLoader hikeId={createdHike?.id} label="Working on your plan" /></div>
       ) : (
         <form className="panel form-panel" onSubmit={(event) => void handleSubmit(event)}>
           <div className="form-grid">
