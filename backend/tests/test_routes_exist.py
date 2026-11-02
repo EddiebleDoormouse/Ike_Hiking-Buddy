@@ -15,7 +15,6 @@ ROUTES = [
     ),
     ("GET", "/search?q=fox", {}),
     ("GET", "/species/near?lat=51.5&lon=-0.1", {}),
-    ("POST", "/hikes/hike-1/recap", {}),
 ]
 
 
